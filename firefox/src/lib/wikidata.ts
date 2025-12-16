@@ -12,6 +12,8 @@ import {
   type WikidataCoordinateValue,
 } from './types';
 
+const LOG_LEVEL = 5;
+
 const WIKIDATA_API = 'https://www.wikidata.org/w/api.php';
 const WIKIDATA_SPARQL = 'https://query.wikidata.org/sparql';
 const BATCH_SIZE = 50; // Max entities per API request
@@ -103,7 +105,7 @@ export async function getQIDsFromWikipediaUrls(
         action: 'wbgetentities',
         sites: site,
         titles: titles,
-        props: 'info',
+        props: 'sitelinks',
         format: 'json',
         origin: '*',
       });
@@ -111,6 +113,10 @@ export async function getQIDsFromWikipediaUrls(
       try {
         const response = await fetch(`${WIKIDATA_API}?${params}`);
         const data: WikidataApiResponse = await response.json();
+
+        // With props=sitelinks, response includes sitelinks that map QID -> Wikipedia title
+        // e.g., {"entities":{"Q483915":{"type":"item","id":"Q483915","sitelinks":{"enwiki":{"site":"enwiki","title":"FLIR Systems"}}}}}
+        // Missing entries use negative IDs: {"-1":{"site":"enwiki","title":"Missing_Title","missing":""}}
 
         if (data.entities) {
           for (const [qid, entity] of Object.entries(data.entities)) {
@@ -122,6 +128,7 @@ export async function getQIDsFromWikipediaUrls(
                   (item) => item.title === sitelink.title
                 );
                 if (matchingItem) {
+                  if (LOG_LEVEL > 2) console.log(`WikiColumn: Matched Wikipedia URL ${matchingItem.url} to QID ${qid}`); 
                   results.set(matchingItem.url, qid);
                 }
               }
@@ -133,7 +140,7 @@ export async function getQIDsFromWikipediaUrls(
       }
     }
   }
-
+  console.log(`WikiColumn: Retrieved ${results.size} QIDs from Wikipedia URLs`, results);
   return results;
 }
 

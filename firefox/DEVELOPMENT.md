@@ -1,4 +1,4 @@
-# Webtero Development Guide
+# WikiColumn Development Guide
 
 ## Building the Extension
 
@@ -44,9 +44,6 @@ The extension will be loaded and the sidebar will automatically open.
 │   ├── lib/                  # Shared libraries
 │   │   ├── types.ts          # TypeScript type definitions
 │   │   ├── storage.ts        # browser.storage.local wrapper
-│   │   ├── zotero-api.ts     # Zotero Web API client
-│   │   ├── zotero-connector.ts  # Local Zotero connector
-│   │   └── utils.ts          # Utility functions
 │   ├── background/           # Background service worker
 │   │   └── background.ts
 │   ├── sidebar/              # Sidebar panel
@@ -73,65 +70,5 @@ The extension will be loaded and the sidebar will automatically open.
 2. Build outputs to `dist/` via `pnpm run build` or `pnpm run watch`
 3. Reload the extension in Firefox:
    - Go to `about:debugging`
-   - Click "Reload" on the Webtero extension
+   - Click "Reload" on the WikiColumn extension
 4. Test changes in the browser
-
-## Key Features Implemented
-
-### MVP Features
-- ✅ OAuth/API key configuration (stubbed)
-- ✅ Project management (sync from Zotero Collections)
-- ✅ Save current page to Zotero
-- ✅ Create annotations with multiple highlight colors
-- ✅ Visual highlights on page
-- ✅ Annotation display in sidebar
-- ✅ Zotero Connector integration
-
-### Highlight Colors
-- Yellow (default)
-- Green
-- Blue
-- Pink
-- Purple
-
-## Configuration
-
-### Zotero API Key
-1. Open extension settings (click ⚙ in sidebar or go to `about:addons`)
-2. Enter your Zotero API key (get one from https://www.zotero.org/settings/keys)
-3. Save credentials
-
-### Zotero Connector
-The extension will automatically detect if Zotero is running locally on port 23119.
-
-## Troubleshooting
-
-### Extension Not Loading
-- Ensure `pnpm run build` completed successfully
-- Check that `dist/manifest.json` exists
-- Look for errors in the Firefox Browser Console
-
-### API Errors
-- Verify your Zotero API key is valid
-- Check that you have network access to api.zotero.org
-- User ID is currently hardcoded to "12345" for MVP
-
-### Highlights Not Appearing
-- Ensure the page is saved to Zotero first
-- Check the Browser Console for errors
-- Try refreshing annotations in the sidebar
-
-### Build Errors
-- Delete `node_modules/` and run `pnpm install` again
-- Delete `dist/` and run `pnpm run clean && pnpm run build`
-- Check that TypeScript version is 5.3.3 or higher
-
-## Next Steps (Post-MVP)
-
-- Implement full OAuth flow
-- Add page % read tracking
-- Implement child page auto-capture
-- Add link indicators for Zotero'd pages
-- Implement snapshot versioning
-- Add change detection
-- Cross-device sync

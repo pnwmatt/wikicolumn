@@ -164,7 +164,8 @@ export type MessageType =
   | 'EXTRACT_TABLE'
   | 'INJECT_COLUMNS'
   | 'OPEN_SIDEBAR'
-  | 'UPDATE_INSTANCE_OF';
+  | 'UPDATE_INSTANCE_OF'
+  | 'CONTEXT_MENU_ACTIVATED';
 
 export interface EditTablePayload {
   tableData: TableData;
@@ -212,6 +213,11 @@ export interface UpdateInstanceOfPayload {
   instanceOfData: Record<number, string>; // rowIndex -> instance of label
 }
 
+export interface ContextMenuActivatedPayload {
+  url: string;
+  tabId: number;
+}
+
 export type Message =
   | { type: 'EDIT_TABLE'; payload: EditTablePayload }
   | { type: 'ADD_COLUMN'; payload: AddColumnPayload }
@@ -220,6 +226,7 @@ export type Message =
   | { type: 'EXTRACT_TABLE'; payload: ExtractTablePayload }
   | { type: 'INJECT_COLUMNS'; payload: InjectColumnsPayload }
   | { type: 'UPDATE_INSTANCE_OF'; payload: UpdateInstanceOfPayload }
+  | { type: 'CONTEXT_MENU_ACTIVATED'; payload: ContextMenuActivatedPayload }
   | { type: 'OPEN_SIDEBAR' };
 
 // ============================================================================

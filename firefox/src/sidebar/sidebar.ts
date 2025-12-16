@@ -15,13 +15,15 @@ import {
 import { db } from '../lib/database';
 import { generateId } from '../lib/utils';
 import {
-  getQIDsFromWikipediaUrls,
+  queryEntitiesByLabel,
   getEntityData,
   parseClaims,
   getPropertyInfo,
   getClaimDisplayValues,
   getInstanceOfLabels,
 } from '../lib/wikidata';
+
+const LOG_LEVEL = 2;
 
 // DOM Elements
 const emptyState = document.getElementById('emptyState')!;
@@ -69,6 +71,7 @@ function showState(state: 'empty' | 'loading' | 'editor'): void {
 
 function setLoadingMessage(message: string): void {
   loadingMessage.textContent = message;
+  console.log(`WikiColumn: Sidebar Loading Message: ${message}`);
 }
 
 // Helper: Detect key column (first column with Wikipedia links)
@@ -222,10 +225,10 @@ function escapeHtml(text: string): string {
 async function loadTable(payload: EditTablePayload): Promise<void> {
   showState('loading');
   setLoadingMessage('Loading table...');
+  console.log('WikiColumn: Loading table in sidebar...', payload);
 
   currentTableData = payload.tableData;
   currentUrl = payload.url;
-  currentTabId = payload.tabId;
 
   // Detect key column
   const keyColumnIndex = detectKeyColumn(currentTableData);
@@ -242,6 +245,7 @@ async function loadTable(payload: EditTablePayload): Promise<void> {
   // Check if table already exists in database
   let tableRecord = await db.getTableByUrlAndXpath(currentUrl, currentTableData.xpath);
 
+  if (LOG_LEVEL > 1) console.log('WikiColumn: Loaded table record from DB:', tableRecord);
   if (!tableRecord) {
     // Create new table record
     tableRecord = {
@@ -260,6 +264,7 @@ async function loadTable(payload: EditTablePayload): Promise<void> {
       updatedAt: new Date().toISOString(),
     };
     await db.saveTable(tableRecord);
+    if (LOG_LEVEL > 1) console.log("WikiColumn: Created new table record in DB:", tableRecord);
   }
 
   currentTableRecord = tableRecord;
@@ -269,6 +274,7 @@ async function loadTable(payload: EditTablePayload): Promise<void> {
   tableStats.textContent = `${currentTableData.rows.length} rows, ${currentTableData.headers.length} columns`;
   renderColumns();
 
+  if (LOG_LEVEL > 0) console.log('WikiColumn: Starting Wikidata matching for table:', tableRecord);
   // Start Wikidata matching
   await matchWikidata(keyColumnIndex);
 
@@ -283,33 +289,31 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   matchingSection.style.display = 'block';
   updateMatchingProgress(0, currentTableData.rows.length);
 
-  // Collect Wikipedia URLs from key column
-  const wikipediaUrls: string[] = [];
-  const rowToUrl = new Map<number, string>();
+  // Collect text labels from key column
+  const labels: string[] = [];
+  const rowToLabel = new Map<number, string>();
 
   currentTableData.rows.forEach((row, rowIndex) => {
     const cell = row[keyColumnIndex];
-    if (cell) {
-      const wikiLink = cell.links.find((link) => link.isWikipedia);
-      if (wikiLink) {
-        wikipediaUrls.push(wikiLink.href);
-        rowToUrl.set(rowIndex, wikiLink.href);
-      }
+    if (cell && cell.text.trim()) {
+      const label = cell.text.trim();
+      labels.push(label);
+      rowToLabel.set(rowIndex, label);
     }
   });
 
-  // Get QIDs from Wikipedia URLs
-  setLoadingMessage('Fetching Wikidata IDs...');
-  const urlToQid = await getQIDsFromWikipediaUrls(wikipediaUrls);
+  // Get QIDs from labels using SPARQL
+  setLoadingMessage('Searching Wikidata by label...');
+  const labelToEntity = await queryEntitiesByLabel(labels, PRIMARY_LANGUAGE);
 
   // Build row matches
   rowMatches = currentTableData.rows.map((_, rowIndex) => {
-    const url = rowToUrl.get(rowIndex);
-    const qid = url ? urlToQid.get(url) || null : null;
+    const label = rowToLabel.get(rowIndex);
+    const entity = label ? labelToEntity.get(label) : undefined;
     return {
       rowIndex,
-      qid,
-      wikipediaUrl: url,
+      qid: entity?.qid || null,
+      label: entity?.label || label,
     };
   });
 
@@ -580,6 +584,10 @@ propertyModal.addEventListener('click', (e) => {
 browser.runtime.onMessage.addListener((message: Message) => {
   if (message.type === 'EDIT_TABLE') {
     loadTable(message.payload as EditTablePayload);
+  }
+  else if (message.type === 'CONTEXT_MENU_ACTIVATED') {
+    const { tabId } = message.payload;
+    currentTabId = tabId;
   }
   return true;
 });

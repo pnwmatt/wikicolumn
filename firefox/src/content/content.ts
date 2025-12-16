@@ -21,6 +21,15 @@ const injectedColumnsByTable = new Map<string, string[]>();
 // Track which table the hamburger menu was clicked on
 let activeTable: HTMLTableElement | null = null;
 
+// Track the last right-clicked element (for context menu)
+let lastRightClickedElement: Element | null = null;
+
+// Listen for right-click to capture the target element
+document.addEventListener('contextmenu', (e) => {
+  lastRightClickedElement = e.target as Element;
+  console.log('WikiColumn: Right-clicked on element:', lastRightClickedElement);
+});
+
 const LOG_LEVEL = 5;
 
 /**
@@ -205,36 +214,40 @@ function addKeyIndicator(table: HTMLTableElement, colIndex: number): void {
 }
 
 /**
- * Add hamburger menu to the rightmost cell of each data row
+ * Add hamburger menu to the header row (rightmost cell)
  */
-function addHamburgerMenus(table: HTMLTableElement): void {
-  const dataRows = getDataRows(table);
+function addHamburgerMenu(table: HTMLTableElement): void {
+  const headerRow = getHeaderRow(table);
+  if (!headerRow) return;
 
-  dataRows.forEach((row) => {
-    const cells = row.querySelectorAll('td, th');
-    const lastCell = cells[cells.length - 1] as HTMLTableCellElement | undefined;
+  const headerCells = headerRow.querySelectorAll('th, td');
+  const lastCell = headerCells[headerCells.length - 1] as HTMLTableCellElement | undefined;
 
-    if (lastCell && !lastCell.querySelector('.wikicolumn-menu-btn')) {
-      // Make the cell position relative for absolute positioning of menu
-      const currentPosition = window.getComputedStyle(lastCell).position;
-      if (currentPosition === 'static') {
-        lastCell.style.position = 'relative';
-      }
-
-      const menuBtn = document.createElement('button');
-      menuBtn.className = 'wikicolumn-menu-btn';
-      menuBtn.innerHTML = '☰';
-      menuBtn.title = 'Open WikiColumn';
-      menuBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        activeTable = table;
-        openSidebarWithTable(table);
-      });
-
-      lastCell.appendChild(menuBtn);
+  if (lastCell && !lastCell.querySelector('.wikicolumn-menu-btn')) {
+    // Make the cell position relative for absolute positioning of menu
+    const currentPosition = window.getComputedStyle(lastCell).position;
+    if (currentPosition === 'static') {
+      lastCell.style.position = 'relative';
     }
-  });
+
+    // Add a wrapper span for the hamburger to prevent layout shift
+    const menuWrapper = document.createElement('span');
+    menuWrapper.className = 'wikicolumn-menu-wrapper';
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'wikicolumn-menu-btn';
+    menuBtn.innerHTML = '☰';
+    menuBtn.title = 'Edit table with WikiColumn';
+    menuBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      activeTable = table;
+      openSidebarWithTable(table);
+    });
+
+    menuWrapper.appendChild(menuBtn);
+    lastCell.appendChild(menuWrapper);
+  }
 }
 
 /**
@@ -280,25 +293,19 @@ function extractTableData(table: HTMLTableElement): TableData {
  */
 async function openSidebarWithTable(table: HTMLTableElement): Promise<void> {
   console.log("WikiColumn: Opening sidebar with table", table);
-  const tableData = extractTableData(table);
 
-  // Open sidebar
-  await browser.runtime.sendMessage({ type: 'OPEN_SIDEBAR' });
-
-  // Small delay to ensure sidebar is ready
+  // Small delay to ensure sidebar is ready (if it opened)
   await new Promise((resolve) => setTimeout(resolve, 150));
 
-  // Get current tab info
-  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-  const tabId = tabs[0]?.id || 0;
+  const tableData = extractTableData(table);
 
-  // Send table data to sidebar
+
+  // Send table data to sidebar - this will work if sidebar is open
   await browser.runtime.sendMessage({
     type: 'EDIT_TABLE',
     payload: {
       tableData,
       url: window.location.href,
-      tabId,
     },
   });
 }
@@ -312,6 +319,16 @@ function processTable(table: HTMLTableElement): void {
 
   console.log("WikiColumn: Found new table to process", table);
 
+  // If the table doesn't have a non-nested thead or th, skip processing
+  const hasThead = !!table.querySelector(':scope > thead, :scope > tbody > thead');
+  const hasTh = !!table.querySelector(':scope > thead > th, :scope > th, :scope > tr > th, :scope > tbody > tr > th');
+  const hasClass = table.classList.contains('wikicolumn-enabled');
+  if (LOG_LEVEL > 2) console.log("WikiColumn: Table hasThead =", hasThead, ", hasTh =", hasTh);
+  if (!hasThead && !hasTh) {
+    console.log("WikiColumn: Skipping table without header", table);
+    return;
+  }
+
   // Find key column (leftmost with Wikipedia links)
   const keyColIndex = findKeyColumn(table);
 
@@ -319,8 +336,8 @@ function processTable(table: HTMLTableElement): void {
     // Add key indicator to header
     addKeyIndicator(table, keyColIndex);
 
-    // Add hamburger menus to each row
-    addHamburgerMenus(table);
+    // Add hamburger menu to header row
+    addHamburgerMenu(table);
 
     // Mark table as WikiColumn-enabled
     table.classList.add('wikicolumn-enabled');
@@ -438,15 +455,41 @@ async function reinjectSavedColumns(): Promise<void> {
 
 // Listen for messages from background script
 browser.runtime.onMessage.addListener(
-  (message: Message, _sender, sendResponse) => {
+  async (message: Message, _sender, sendResponse) => {
     switch (message.type) {
-      case 'EXTRACT_TABLE': {
-        console.log("WikiColumn: Received EXTRACT_TABLE. activeTable =", activeTable);
-        if (activeTable) {
-          const tableData = extractTableData(activeTable);
-          sendResponse({ tableData });
+      case 'CONTEXT_MENU_ACTIVATED': {
+        // Background script opened the sidebar and is telling us to extract the table
+        const payload = message.payload as { url: string };
+        let table: HTMLTableElement | null = null;
+
+        // Use the element captured by our contextmenu listener
+        if (lastRightClickedElement) {
+          table = lastRightClickedElement.closest('table');
+          console.log('WikiColumn: Found table from lastRightClickedElement:', table);
+        }
+
+        // Fall back to activeTable (hamburger menu click)
+        if (!table && activeTable) {
+          table = activeTable;
+          console.log('WikiColumn: Using activeTable:', table);
+        }
+
+        console.log("WikiColumn: Received CONTEXT_MENU_ACTIVATED. table =", table);
+
+        if (table) {
+          const tableData = extractTableData(table!);
+
+          // Send table data directly to sidebar
+          browser.runtime.sendMessage({
+            type: 'EDIT_TABLE',
+            payload: {
+              tableData,
+              url: payload.url || window.location.href,
+            },
+          });
+          return true;
         } else {
-          sendResponse({ error: 'No active table' });
+          console.warn('WikiColumn: No table found at click location');
         }
         break;
       }

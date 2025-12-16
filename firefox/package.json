@@ -1,0 +1,22 @@
+{
+  "name": "webtero",
+  "version": "0.1.5",
+  "description": "Transform web research from scattered bookmarks into structured knowledge projects",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.js",
+    "watch": "node esbuild.config.js --watch",
+    "clean": "rm -rf dist",
+    "sync": "while inotifywait -r -e modify,create,delete,move dist; do rsync -avz --delete dist/ 192.168.50.225:~/Downloads/webtero-dist/; done",
+    "push": "rsync -avz --delete ./dist/ laptop1:~/Downloads/webtero-dist/",
+    "copy-singlefile": "node scripts/copy-singlefile.js"
+  },
+  "devDependencies": {
+    "@types/firefox-webext-browser": "^120.0.4",
+    "esbuild": "^0.25.0",
+    "modern-normalize": "^2.0.0",
+    "typescript": "^5.3.3",
+    "web-ext": "^9.2.0"
+  }
+}

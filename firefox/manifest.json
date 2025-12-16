@@ -1,0 +1,69 @@
+{
+  "manifest_version": 3,
+  "name": "WikiColumn",
+  "version": "0.0.1",
+  "description": "Enrich your browsing experience with Wikidata content",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "scripting",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://wikidata.org/*"
+  ],
+  "background": {
+    "scripts": [
+      "background/background.js"
+    ],
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Webtero Sidebar",
+    "default_icon": "sidebar/icon-w.svg"
+  },
+  "sidebar_action": {
+    "default_panel": "sidebar/sidebar.html",
+    "default_title": "Webtero",
+    "default_icon": "sidebar/icon-w.svg",
+    "open_at_install": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "wikicolumn@pnwmatt.net",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": [
+          "authenticationInfo",
+          "browsingActivity",
+          "websiteContent",
+          "websiteActivity",
+          "searchTerms"
+        ]
+      }
+    }
+  },
+  "icons": {
+    "32": "sidebar/icon-w.svg",
+    "64": "sidebar/icon-w.svg"
+  }
+}

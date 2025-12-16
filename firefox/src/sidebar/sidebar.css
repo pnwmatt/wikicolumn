@@ -436,3 +436,42 @@ body {
 .match-indicator.unmatched {
   color: var(--fill-tertiary);
 }
+
+/* Instance types section */
+.instance-types-section {
+  border-bottom: 1px solid var(--fill-quinary);
+  padding-bottom: 0.75rem;
+}
+
+.instance-types-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 1rem;
+}
+
+.instance-type-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--fill-secondary);
+  border-radius: 4px;
+}
+
+.instance-type-item.primary {
+  background: var(--accent-blue10);
+  color: var(--fill-primary);
+  font-weight: 500;
+}
+
+.instance-type-name {
+  flex: 1;
+}
+
+.instance-type-score {
+  font-size: 0.75rem;
+  color: var(--fill-tertiary);
+  min-width: 2rem;
+  text-align: right;
+}

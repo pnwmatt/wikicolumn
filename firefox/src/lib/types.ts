@@ -197,6 +197,7 @@ export interface ReorderColumnPayload {
 
 export interface InjectColumnsPayload {
   xpath: string;
+  afterColumnIndex: number; // Insert after this column (typically the key column)
   columns: {
     propertyId: string;
     label: string;

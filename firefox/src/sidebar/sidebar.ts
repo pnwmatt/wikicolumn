@@ -37,6 +37,8 @@ const matchingProgressFill = document.getElementById('matchingProgressFill')!;
 const matchingProgressText = document.getElementById('matchingProgressText')!;
 const matchingStatus = document.getElementById('matchingStatus')!;
 const addColumnBtn = document.getElementById('addColumnBtn') as HTMLButtonElement;
+const instanceTypesSection = document.getElementById('instanceTypesSection')!;
+const instanceTypesList = document.getElementById('instanceTypesList')!;
 const propertyModal = document.getElementById('propertyModal')!;
 const closeModalBtn = document.getElementById('closeModalBtn')!;
 const propertySearch = document.getElementById('propertySearch') as HTMLInputElement;
@@ -50,6 +52,13 @@ let currentTabId: number = 0;
 let rowMatches: RowMatch[] = [];
 let availableProperties: PropertyStats[] = [];
 let columns: SidebarColumn[] = [];
+
+// Wikidata matching state (stored for re-filtering)
+let storedLabelToQidMap: Map<string, Map<string, { itemLabel: string; instanceOf: string[] }>> | null = null;
+let storedRowToLabel: Map<number, string> = new Map();
+let storedKeyColumnIndex: number = 0;
+let storedPrimaryInstanceTypes: string[] = [];
+let selectedInstanceTypes: Set<string> = new Set(); // checked instance type filters
 
 // Helper: Convert column index to letter (A, B, C, ... AA, AB, etc.)
 function indexToLetter(index: number): string {
@@ -204,6 +213,44 @@ function renderPropertyList(searchQuery: string = ''): void {
   });
 }
 
+// Render instance types list in the sidebar
+function renderInstanceTypes(
+  instanceOfScores: Map<string, number>,
+  primaryInstanceTypes: string[]
+): void {
+  instanceTypesList.innerHTML = '';
+
+  if (instanceOfScores.size === 0) {
+    instanceTypesSection.style.display = 'none';
+    return;
+  }
+
+  instanceTypesSection.style.display = 'block';
+
+  // Sort by score descending
+  const sortedTypes = Array.from(instanceOfScores.entries())
+    .sort((a, b) => b[1] - a[1]);
+
+  for (const [type, score] of sortedTypes) {
+    const li = document.createElement('li');
+    li.className = 'instance-type-item';
+
+    const isPrimary = primaryInstanceTypes.includes(type);
+    if (isPrimary) {
+      li.classList.add('primary');
+    }
+
+    // Round score to 1 decimal place for display
+    const displayScore = score % 1 === 0 ? score : score.toFixed(1);
+    li.innerHTML = `
+      <span class="instance-type-name">${type}</span>
+      <span class="instance-type-score">${displayScore}</span>
+    `;
+
+    instanceTypesList.appendChild(li);
+  }
+}
+
 // Open property picker modal
 function openPropertyModal(): void {
   propertyModal.style.display = 'flex';
@@ -315,13 +362,16 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   setLoadingMessage('Analyzing entity types...');
 
   // Calculate scores for each instanceOf type
+  // Normalize by dividing by the number of QIDs for each label to avoid inflation
   const instanceOfScores = new Map<string, number>();
   for (const qidMap of labelToQidMap.values()) {
+    const numQids = qidMap.size;
     for (const labelMatch of qidMap.values()) {
       // labelMatch is { itemLabel, instanceOf[] }
       for (const instanceType of labelMatch.instanceOf) {
         if (instanceType) {
-          instanceOfScores.set(instanceType, (instanceOfScores.get(instanceType) || 0) + 1);
+          // Divide by number of QIDs for this label to normalize
+          instanceOfScores.set(instanceType, (instanceOfScores.get(instanceType) || 0) + (1 / numQids));
         }
       }
     }
@@ -341,7 +391,8 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
     console.log('WikiColumn: Primary instance types:', primaryInstanceTypes);
   }
 
-
+  // Render the instance types in the sidebar
+  renderInstanceTypes(instanceOfScores, primaryInstanceTypes);
 
   // Build row matches
   rowMatches = currentTableData.rows.map((_, rowIndex) => {
@@ -573,9 +624,10 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
     propertyId,
   });
 
-  // Send message to content script to inject column
+  // Send message to content script to inject column (after key column)
   const injectPayload: InjectColumnsPayload = {
     xpath: currentTableRecord.xpath,
+    afterColumnIndex: currentTableRecord.keyColumnIndex,
     columns: [{
       propertyId,
       label,

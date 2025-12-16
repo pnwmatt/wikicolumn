@@ -182,6 +182,16 @@ function findKeyColumn(table: HTMLTableElement): number {
   const numCols = headerRow.querySelectorAll('td').length;
 
   for (let colIndex = 0; colIndex < numCols; colIndex++) {
+    // if the column is center aligned, skip it (likely not a key column)
+    const headerCells = headerRow.querySelectorAll('td');
+    const headerCell = headerCells[colIndex] as HTMLTableCellElement | undefined;
+    if (headerCell) {
+      const textAlign = window.getComputedStyle(headerCell).textAlign;
+      if (textAlign === 'center') {
+        if (LOG_LEVEL > 2) console.log("WikiColumn: findKeyColumn: skipping center-aligned column", colIndex);
+        continue;
+      }
+    }
     if (columnHasWikipediaLinks(table, colIndex)) {
 
       console.log("WikiColumn: findKeyColumn: found key column at index", colIndex);
@@ -365,16 +375,17 @@ function scanTables(): void {
 }
 
 /**
- * Inject a column into a table
+ * Inject a column into a table after a specific column index
  */
 function injectColumn(
   table: HTMLTableElement,
   headerHtml: string,
   values: string[],
-  propertyId: string
+  propertyId: string,
+  afterColumnIndex: number
 ): void {
   const xpath = getXPath(table);
-  console.log("WikiColumn: injectColumn: injecting column", propertyId, "into table", xpath, "with values", values);
+  console.log("WikiColumn: injectColumn: injecting column", propertyId, "after column", afterColumnIndex, "into table", xpath);
 
   const existing = injectedColumnsByTable.get(xpath) || [];
   existing.push(propertyId);
@@ -386,7 +397,15 @@ function injectColumn(
     th.innerHTML = headerHtml;
     th.setAttribute('data-wikicolumn-property', propertyId);
     th.classList.add('wikicolumn-added-column');
-    headerRow.appendChild(th);
+
+    // Insert after the specified column (afterColumnIndex + 1 is the reference node)
+    const headerCells = headerRow.querySelectorAll('th, td');
+    const refCell = headerCells[afterColumnIndex + 1];
+    if (refCell) {
+      headerRow.insertBefore(th, refCell);
+    } else {
+      headerRow.appendChild(th);
+    }
   }
 
   const dataRows = getDataRows(table);
@@ -395,7 +414,15 @@ function injectColumn(
     td.textContent = values[index] || '';
     td.setAttribute('data-wikicolumn-property', propertyId);
     td.classList.add('wikicolumn-added-column');
-    row.appendChild(td);
+
+    // Insert after the specified column
+    const cells = row.querySelectorAll('td, th');
+    const refCell = cells[afterColumnIndex + 1];
+    if (refCell) {
+      row.insertBefore(td, refCell);
+    } else {
+      row.appendChild(td);
+    }
   });
 }
 
@@ -550,7 +577,7 @@ browser.runtime.onMessage.addListener(
         const table = getNodeFromXPath(payload.xpath, document) as HTMLTableElement;
         if (table && table.tagName === 'TABLE') {
           for (const column of payload.columns) {
-            injectColumn(table, column.headerHtml, column.values, column.propertyId);
+            injectColumn(table, column.headerHtml, column.values, column.propertyId, payload.afterColumnIndex);
           }
           sendResponse({ success: true });
         } else {
@@ -573,6 +600,7 @@ browser.runtime.onMessage.addListener(
       }
 
       case 'UPDATE_INSTANCE_OF': {
+        return;
         console.log("WikiColumn: Received UPDATE_INSTANCE_OF message", message);
         const updatePayload = message.payload as UpdateInstanceOfPayload;
         const updateTable = getNodeFromXPath(updatePayload.xpath, document) as HTMLTableElement;

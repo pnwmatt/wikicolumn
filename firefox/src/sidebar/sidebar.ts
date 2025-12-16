@@ -1,0 +1,591 @@
+// WikiColumn - Sidebar UI
+
+import {
+  PRIMARY_LANGUAGE,
+  type Message,
+  type EditTablePayload,
+  type TableData,
+  type TableRecord,
+  type RowMatch,
+  type PropertyStats,
+  type SidebarColumn,
+  type Claim,
+  type InjectColumnsPayload,
+} from '../lib/types';
+import { db } from '../lib/database';
+import { generateId } from '../lib/utils';
+import {
+  getQIDsFromWikipediaUrls,
+  getEntityData,
+  parseClaims,
+  getPropertyInfo,
+  getClaimDisplayValues,
+  getInstanceOfLabels,
+} from '../lib/wikidata';
+
+// DOM Elements
+const emptyState = document.getElementById('emptyState')!;
+const loadingState = document.getElementById('loadingState')!;
+const loadingMessage = document.getElementById('loadingMessage')!;
+const tableEditor = document.getElementById('tableEditor')!;
+const tableTitle = document.getElementById('tableTitle')!;
+const tableStats = document.getElementById('tableStats')!;
+const columnsList = document.getElementById('columnsList')!;
+const matchingSection = document.getElementById('matchingSection')!;
+const matchingProgressFill = document.getElementById('matchingProgressFill')!;
+const matchingProgressText = document.getElementById('matchingProgressText')!;
+const matchingStatus = document.getElementById('matchingStatus')!;
+const addColumnBtn = document.getElementById('addColumnBtn') as HTMLButtonElement;
+const propertyModal = document.getElementById('propertyModal')!;
+const closeModalBtn = document.getElementById('closeModalBtn')!;
+const propertySearch = document.getElementById('propertySearch') as HTMLInputElement;
+const propertyList = document.getElementById('propertyList')!;
+
+// State
+let currentTableData: TableData | null = null;
+let currentTableRecord: TableRecord | null = null;
+let currentUrl: string = '';
+let currentTabId: number = 0;
+let rowMatches: RowMatch[] = [];
+let availableProperties: PropertyStats[] = [];
+let columns: SidebarColumn[] = [];
+
+// Helper: Convert column index to letter (A, B, C, ... AA, AB, etc.)
+function indexToLetter(index: number): string {
+  let letter = '';
+  while (index >= 0) {
+    letter = String.fromCharCode((index % 26) + 65) + letter;
+    index = Math.floor(index / 26) - 1;
+  }
+  return letter;
+}
+
+// Helper: Show specific UI state
+function showState(state: 'empty' | 'loading' | 'editor'): void {
+  emptyState.style.display = state === 'empty' ? 'flex' : 'none';
+  loadingState.style.display = state === 'loading' ? 'flex' : 'none';
+  tableEditor.style.display = state === 'editor' ? 'flex' : 'none';
+}
+
+function setLoadingMessage(message: string): void {
+  loadingMessage.textContent = message;
+}
+
+// Helper: Detect key column (first column with Wikipedia links)
+function detectKeyColumn(tableData: TableData): number {
+  // Check each column for Wikipedia links
+  for (let colIndex = 0; colIndex < tableData.headers.length; colIndex++) {
+    let hasWikipediaLinks = false;
+
+    for (const row of tableData.rows) {
+      const cell = row[colIndex];
+      if (cell && cell.links.some((link) => link.isWikipedia)) {
+        hasWikipediaLinks = true;
+        break;
+      }
+    }
+
+    if (hasWikipediaLinks) {
+      return colIndex;
+    }
+  }
+
+  // Default to first column if no Wikipedia links found
+  return 0;
+}
+
+// Render columns list in sidebar
+function renderColumns(): void {
+  columnsList.innerHTML = '';
+
+  columns.forEach((col) => {
+    const item = document.createElement('div');
+    item.className = `column-item${col.isWikidata ? ' wikidata-column' : ''}`;
+    item.draggable = true;
+    item.dataset.index = col.index.toString();
+
+    item.innerHTML = `
+      <span class="column-letter">${col.letter}</span>
+      <span class="column-name">${escapeHtml(col.header)}</span>
+      ${col.isKey ? '<span class="column-key-icon" title="Key column for Wikidata matching">🔑</span>' : ''}
+      ${col.isWikidata ? `
+        <div class="column-actions">
+          <button class="column-action-btn delete" title="Remove column" data-property="${col.propertyId}">🗑️</button>
+        </div>
+      ` : ''}
+    `;
+
+    // Handle delete button click
+    const deleteBtn = item.querySelector('.column-action-btn.delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const propertyId = (e.target as HTMLElement).dataset.property;
+        if (propertyId) {
+          removeWikidataColumn(propertyId);
+        }
+      });
+    }
+
+    columnsList.appendChild(item);
+  });
+}
+
+// Update matching progress UI
+function updateMatchingProgress(matched: number, total: number): void {
+  const percentage = total > 0 ? Math.round((matched / total) * 100) : 0;
+  matchingProgressFill.style.width = `${percentage}%`;
+  matchingProgressText.textContent = `${percentage}%`;
+  matchingStatus.textContent = `${matched} of ${total} rows matched`;
+}
+
+// Render property list in modal
+function renderPropertyList(searchQuery: string = ''): void {
+  const filteredProperties = availableProperties.filter((prop) => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      prop.label.toLowerCase().includes(query) ||
+      prop.description.toLowerCase().includes(query)
+    );
+  });
+
+  // Sort by usage percentage (descending)
+  filteredProperties.sort((a, b) => b.percentage - a.percentage);
+
+  propertyList.innerHTML = '';
+
+  if (filteredProperties.length === 0) {
+    propertyList.innerHTML = '<div class="property-item"><span class="property-info"><span class="property-label">No properties found</span></span></div>';
+    return;
+  }
+
+  filteredProperties.forEach((prop) => {
+    const item = document.createElement('div');
+    item.className = `property-item${prop.visible ? '' : ' hidden'}`;
+    item.dataset.pid = prop.pid;
+
+    item.innerHTML = `
+      <div class="property-info">
+        <div class="property-label">${escapeHtml(prop.label)}</div>
+        <div class="property-description">${escapeHtml(prop.description)}</div>
+      </div>
+      <span class="property-usage">${prop.percentage}%</span>
+      <button class="property-visibility-btn" title="${prop.visible ? 'Hide' : 'Show'}">${prop.visible ? '👁️' : '👁️‍🗨️'}</button>
+    `;
+
+    // Click on property to add column
+    item.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).classList.contains('property-visibility-btn')) {
+        return;
+      }
+      addWikidataColumn(prop.pid, prop.label);
+      closePropertyModal();
+    });
+
+    // Click on visibility button
+    const visibilityBtn = item.querySelector('.property-visibility-btn');
+    if (visibilityBtn) {
+      visibilityBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        prop.visible = !prop.visible;
+        await db.updatePropertyVisibility(prop.pid, prop.visible);
+        renderPropertyList(searchQuery);
+      });
+    }
+
+    propertyList.appendChild(item);
+  });
+}
+
+// Open property picker modal
+function openPropertyModal(): void {
+  propertyModal.style.display = 'flex';
+  propertySearch.value = '';
+  renderPropertyList();
+  propertySearch.focus();
+}
+
+// Close property picker modal
+function closePropertyModal(): void {
+  propertyModal.style.display = 'none';
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Main function: Load table and start Wikidata matching
+async function loadTable(payload: EditTablePayload): Promise<void> {
+  showState('loading');
+  setLoadingMessage('Loading table...');
+
+  currentTableData = payload.tableData;
+  currentUrl = payload.url;
+  currentTabId = payload.tabId;
+
+  // Detect key column
+  const keyColumnIndex = detectKeyColumn(currentTableData);
+
+  // Build columns array
+  columns = currentTableData.headers.map((header, index) => ({
+    letter: indexToLetter(index),
+    index,
+    header: header.text,
+    isKey: index === keyColumnIndex,
+    isWikidata: false,
+  }));
+
+  // Check if table already exists in database
+  let tableRecord = await db.getTableByUrlAndXpath(currentUrl, currentTableData.xpath);
+
+  if (!tableRecord) {
+    // Create new table record
+    tableRecord = {
+      id: generateId(),
+      url: currentUrl,
+      tableTitle: currentTableData.tableTitle || 'Untitled Table',
+      xpath: currentTableData.xpath,
+      originalColumns: currentTableData.headers.map((h, i) => ({
+        index: i,
+        header: h.text,
+        headerHtml: h.html,
+      })),
+      addedColumns: [],
+      keyColumnIndex,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await db.saveTable(tableRecord);
+  }
+
+  currentTableRecord = tableRecord;
+
+  // Update UI
+  tableTitle.textContent = tableRecord.tableTitle || 'Table';
+  tableStats.textContent = `${currentTableData.rows.length} rows, ${currentTableData.headers.length} columns`;
+  renderColumns();
+
+  // Start Wikidata matching
+  await matchWikidata(keyColumnIndex);
+
+  showState('editor');
+}
+
+// Match rows to Wikidata entities
+async function matchWikidata(keyColumnIndex: number): Promise<void> {
+  if (!currentTableData) return;
+
+  setLoadingMessage('Matching rows to Wikidata...');
+  matchingSection.style.display = 'block';
+  updateMatchingProgress(0, currentTableData.rows.length);
+
+  // Collect Wikipedia URLs from key column
+  const wikipediaUrls: string[] = [];
+  const rowToUrl = new Map<number, string>();
+
+  currentTableData.rows.forEach((row, rowIndex) => {
+    const cell = row[keyColumnIndex];
+    if (cell) {
+      const wikiLink = cell.links.find((link) => link.isWikipedia);
+      if (wikiLink) {
+        wikipediaUrls.push(wikiLink.href);
+        rowToUrl.set(rowIndex, wikiLink.href);
+      }
+    }
+  });
+
+  // Get QIDs from Wikipedia URLs
+  setLoadingMessage('Fetching Wikidata IDs...');
+  const urlToQid = await getQIDsFromWikipediaUrls(wikipediaUrls);
+
+  // Build row matches
+  rowMatches = currentTableData.rows.map((_, rowIndex) => {
+    const url = rowToUrl.get(rowIndex);
+    const qid = url ? urlToQid.get(url) || null : null;
+    return {
+      rowIndex,
+      qid,
+      wikipediaUrl: url,
+    };
+  });
+
+  const matchedCount = rowMatches.filter((m) => m.qid).length;
+  updateMatchingProgress(matchedCount, rowMatches.length);
+
+  // Fetch entity data for matched QIDs
+  const qids = rowMatches.filter((m) => m.qid).map((m) => m.qid!);
+  if (qids.length > 0) {
+    setLoadingMessage('Fetching entity data...');
+    const entityData = await getEntityData(qids, PRIMARY_LANGUAGE);
+
+    // Save items to database
+    const items = Array.from(entityData.values());
+    await db.saveItems(items);
+
+    // Parse and save claims
+    setLoadingMessage('Processing claims...');
+    const allClaims: Claim[] = [];
+    const allPropertyIds = new Set<string>();
+
+    for (const item of items) {
+      const claims = parseClaims(item.json);
+      allClaims.push(...claims);
+      claims.forEach((claim) => allPropertyIds.add(claim.pid));
+    }
+
+    await db.saveClaims(allClaims);
+
+    // Fetch property info
+    setLoadingMessage('Fetching property labels...');
+    const propertyInfo = await getPropertyInfo(Array.from(allPropertyIds), PRIMARY_LANGUAGE);
+
+    // Save properties
+    const properties = Array.from(propertyInfo.values());
+    await db.saveProperties(properties);
+
+    // Calculate property usage statistics
+    await calculatePropertyStats(qids);
+
+    // Fetch instance of labels and update the page
+    setLoadingMessage('Fetching instance types...');
+    await updateInstanceOfOnPage(keyColumnIndex, qids);
+  }
+
+  // Enable add column button if we have matched rows
+  addColumnBtn.disabled = matchedCount === 0;
+  matchingStatus.textContent = matchedCount > 0
+    ? `${matchedCount} of ${rowMatches.length} rows matched`
+    : 'No Wikipedia links found. Add Wikipedia links to enable Wikidata columns.';
+}
+
+// Fetch instance of labels and send to content script to update the page
+async function updateInstanceOfOnPage(keyColumnIndex: number, qids: string[]): Promise<void> {
+  if (!currentTableRecord) return;
+
+  // Get instance of labels for all QIDs
+  const instanceOfLabels = await getInstanceOfLabels(qids, PRIMARY_LANGUAGE);
+
+  // Build row index -> instance of label map
+  const instanceOfData: Record<number, string> = {};
+
+  for (const match of rowMatches) {
+    if (match.qid && instanceOfLabels.has(match.qid)) {
+      instanceOfData[match.rowIndex] = instanceOfLabels.get(match.qid)!;
+    }
+  }
+
+  // Send to content script
+  try {
+    await browser.tabs.sendMessage(currentTabId, {
+      type: 'UPDATE_INSTANCE_OF',
+      payload: {
+        xpath: currentTableRecord.xpath,
+        keyColIndex: keyColumnIndex,
+        instanceOfData,
+      },
+    });
+  } catch (error) {
+    console.error('WikiColumn: Error updating instance of on page:', error);
+  }
+}
+
+// Calculate property usage statistics
+async function calculatePropertyStats(qids: string[]): Promise<void> {
+  const propertyCounts = new Map<string, number>();
+  const totalRows = qids.length;
+
+  // Count property usage across all QIDs
+  for (const qid of qids) {
+    const claims = await db.getClaimsByQid(qid);
+    const seenProperties = new Set<string>();
+
+    for (const claim of claims) {
+      if (!seenProperties.has(claim.pid)) {
+        seenProperties.add(claim.pid);
+        propertyCounts.set(claim.pid, (propertyCounts.get(claim.pid) || 0) + 1);
+      }
+    }
+  }
+
+  // Build property stats
+  availableProperties = [];
+
+  for (const [pid, count] of propertyCounts) {
+    const property = await db.getProperty(pid);
+    if (property) {
+      availableProperties.push({
+        pid,
+        label: property.label,
+        description: property.description,
+        count,
+        percentage: Math.round((count / totalRows) * 100),
+        visible: property.visible,
+      });
+    }
+  }
+
+  // Sort by percentage
+  availableProperties.sort((a, b) => b.percentage - a.percentage);
+}
+
+// Add a Wikidata column to the table
+async function addWikidataColumn(propertyId: string, label: string): Promise<void> {
+  if (!currentTableData || !currentTableRecord) return;
+
+  showState('loading');
+  setLoadingMessage('Adding column...');
+
+  // Get claim values for each row
+  const qids = rowMatches.filter((m) => m.qid).map((m) => m.qid!);
+  const claimsByQid = await db.getClaimsByQids(qids);
+
+  // Filter claims for the selected property
+  const relevantClaims: Claim[] = [];
+  for (const [, claims] of claimsByQid) {
+    const claim = claims.find((c) => c.pid === propertyId);
+    if (claim) {
+      relevantClaims.push(claim);
+    }
+  }
+
+  // Get display values for claims
+  const displayValues = await getClaimDisplayValues(relevantClaims, PRIMARY_LANGUAGE);
+
+  // Build column values array
+  const values: string[] = [];
+  for (const match of rowMatches) {
+    if (match.qid) {
+      const qidValues = displayValues.get(match.qid);
+      const value = qidValues?.get(propertyId) || '';
+      values.push(value || '🤔'); // Confused emoji for missing values
+    } else {
+      values.push('🤔'); // Confused emoji for unmatched rows
+    }
+  }
+
+  // Create header HTML based on existing column style
+  const originalHeader = currentTableRecord.originalColumns[0];
+  const headerHtml = originalHeader
+    ? originalHeader.headerHtml.replace(
+        new RegExp(escapeRegExp(originalHeader.header), 'g'),
+        label
+      )
+    : label;
+
+  // Add column to table record
+  const newColumn = {
+    propertyId,
+    label,
+    position: currentTableRecord.addedColumns.length,
+  };
+  currentTableRecord.addedColumns.push(newColumn);
+  currentTableRecord.updatedAt = new Date().toISOString();
+  await db.saveTable(currentTableRecord);
+
+  // Add to columns display
+  columns.push({
+    letter: indexToLetter(columns.length),
+    index: columns.length,
+    header: label,
+    isKey: false,
+    isWikidata: true,
+    propertyId,
+  });
+
+  // Send message to content script to inject column
+  const injectPayload: InjectColumnsPayload = {
+    xpath: currentTableRecord.xpath,
+    columns: [{
+      propertyId,
+      label,
+      headerHtml,
+      values,
+    }],
+  };
+
+  try {
+    await browser.tabs.sendMessage(currentTabId, {
+      type: 'INJECT_COLUMNS',
+      payload: injectPayload,
+    });
+  } catch (error) {
+    console.error('WikiColumn: Error injecting column:', error);
+  }
+
+  renderColumns();
+  showState('editor');
+}
+
+// Remove a Wikidata column
+async function removeWikidataColumn(propertyId: string): Promise<void> {
+  if (!currentTableRecord) return;
+
+  // Remove from table record
+  currentTableRecord.addedColumns = currentTableRecord.addedColumns.filter(
+    (col) => col.propertyId !== propertyId
+  );
+  currentTableRecord.updatedAt = new Date().toISOString();
+  await db.saveTable(currentTableRecord);
+
+  // Remove from columns display
+  columns = columns.filter((col) => col.propertyId !== propertyId);
+
+  // Reassign letters
+  columns.forEach((col, index) => {
+    col.letter = indexToLetter(index);
+    col.index = index;
+  });
+
+  // Send message to content script to remove column
+  try {
+    await browser.tabs.sendMessage(currentTabId, {
+      type: 'REMOVE_COLUMN',
+      payload: {
+        tableId: currentTableRecord.id,
+        propertyId,
+        xpath: currentTableRecord.xpath,
+      },
+    });
+  } catch (error) {
+    console.error('WikiColumn: Error removing column:', error);
+  }
+
+  renderColumns();
+}
+
+// Helper: Escape string for use in RegExp
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Event listeners
+addColumnBtn.addEventListener('click', openPropertyModal);
+closeModalBtn.addEventListener('click', closePropertyModal);
+
+propertySearch.addEventListener('input', () => {
+  renderPropertyList(propertySearch.value);
+});
+
+propertyModal.addEventListener('click', (e) => {
+  if (e.target === propertyModal) {
+    closePropertyModal();
+  }
+});
+
+// Listen for messages from background script
+browser.runtime.onMessage.addListener((message: Message) => {
+  if (message.type === 'EDIT_TABLE') {
+    loadTable(message.payload as EditTablePayload);
+  }
+  return true;
+});
+
+// Initialize
+showState('empty');
+db.init().then(() => {
+  console.log('WikiColumn sidebar initialized');
+});

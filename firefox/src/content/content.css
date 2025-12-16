@@ -63,3 +63,59 @@
 .webtero-highlight:hover {
   opacity: 0.6 !important;
 }
+
+/* WikiColumn added columns */
+.wikicolumn-added-column {
+  background-color: rgba(66, 133, 244, 0.08) !important;
+  border-left: 2px solid rgba(66, 133, 244, 0.3) !important;
+}
+
+th.wikicolumn-added-column {
+  background-color: rgba(66, 133, 244, 0.15) !important;
+}
+
+/* WikiColumn key indicator */
+.wikicolumn-key-indicator {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+/* WikiColumn hamburger menu button */
+.wikicolumn-menu-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(66, 133, 244, 0.9);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 10;
+  line-height: 1;
+}
+
+.wikicolumn-menu-btn:hover {
+  background: rgba(66, 133, 244, 1);
+}
+
+/* Show menu button on row hover */
+tr:hover .wikicolumn-menu-btn {
+  opacity: 1;
+}
+
+/* WikiColumn instance of text */
+.wikicolumn-instance-of {
+  color: #666;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+/* Mark tables that have WikiColumn enabled */
+table.wikicolumn-enabled {
+  /* Subtle indicator - can be customized */
+}

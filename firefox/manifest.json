@@ -8,10 +8,11 @@
     "activeTab",
     "tabs",
     "scripting",
-    "identity"
+    "contextMenus"
   ],
   "host_permissions": [
-    "https://wikidata.org/*"
+    "https://*.wikidata.org/*",
+    "https://*.wikipedia.org/*"
   ],
   "background": {
     "scripts": [
@@ -20,12 +21,12 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Open Webtero Sidebar",
+    "default_title": "Open WikiColumn Sidebar",
     "default_icon": "sidebar/icon-w.svg"
   },
   "sidebar_action": {
     "default_panel": "sidebar/sidebar.html",
-    "default_title": "Webtero",
+    "default_title": "WikiColumn",
     "default_icon": "sidebar/icon-w.svg",
     "open_at_install": true
   },

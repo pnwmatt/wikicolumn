@@ -4,24 +4,90 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Webtero</title>
-  <link rel="stylesheet" href="../styles/reset.css">
+  <title>WikiColumn</title>
   <link rel="stylesheet" href="sidebar.css">
 </head>
 
 <body>
-
-
   <div id="mainSidebar" class="sidebar">
     <header class="header">
-      <select id="projectDropdown" class="header-dropdown">
-        <option value="">My Library</option>
-      </select>
+      <span class="header-title">WikiColumn</span>
       <button id="settingsBtn" class="header-settings-btn" title="Settings">&#9881;</button>
     </header>
-    Items.
-  </div>
 
+    <!-- Empty state -->
+    <div id="emptyState" class="empty-state">
+      <div class="empty-state-content">
+        <div class="empty-state-icon">&#128203;</div>
+        <h3>No table selected</h3>
+        <p>Right-click on any table and select "Edit with WikiColumn" to add Wikidata columns.</p>
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div id="loadingState" class="loading-state" style="display: none;">
+      <div class="loading-spinner"></div>
+      <p id="loadingMessage">Loading...</p>
+    </div>
+
+    <!-- Table editor -->
+    <div id="tableEditor" class="table-editor" style="display: none;">
+      <!-- Table info header -->
+      <div class="table-info">
+        <h3 id="tableTitle" class="table-title">Table</h3>
+        <p id="tableStats" class="table-stats"></p>
+      </div>
+
+      <!-- Columns list -->
+      <div class="columns-section">
+        <div class="section-header-static">
+          <h2>Columns</h2>
+        </div>
+        <div id="columnsList" class="columns-list">
+          <!-- Columns will be rendered here -->
+        </div>
+      </div>
+
+      <!-- Wikidata matching status -->
+      <div id="matchingSection" class="matching-section" style="display: none;">
+        <div class="section-header-static">
+          <h2>Wikidata Matching</h2>
+        </div>
+        <div class="matching-content">
+          <div class="matching-progress">
+            <div class="matching-progress-bar">
+              <div id="matchingProgressFill" class="matching-progress-fill"></div>
+            </div>
+            <span id="matchingProgressText" class="matching-progress-text">0%</span>
+          </div>
+          <p id="matchingStatus" class="matching-status"></p>
+        </div>
+      </div>
+
+      <!-- Add column button -->
+      <div class="add-column-section">
+        <button id="addColumnBtn" class="add-column-btn" disabled>
+          + Add Wikidata Column
+        </button>
+      </div>
+    </div>
+
+    <!-- Property picker modal -->
+    <div id="propertyModal" class="modal" style="display: none;">
+      <div class="modal-content property-modal-content">
+        <div class="modal-header">
+          <h3>Add Column</h3>
+          <button id="closeModalBtn" class="modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-search">
+          <input type="text" id="propertySearch" placeholder="Search properties..." />
+        </div>
+        <div id="propertyList" class="property-list">
+          <!-- Properties will be rendered here -->
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="sidebar.js" type="module"></script>
 </body>

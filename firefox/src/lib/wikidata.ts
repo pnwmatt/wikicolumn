@@ -490,6 +490,7 @@ export async function getClaimDisplayValues(
 
 interface SparqlResult {
   qid: { value: string };
+  name: { value: string };
   itemLabel: { value: string };
   instanceOfLabel?: { value: string };
 }
@@ -500,17 +501,27 @@ interface SparqlResponse {
   };
 }
 
+export interface LabelMatch {
+  itemLabel: string;
+  instanceOf: string[];
+}
+
 /**
  * Query Wikidata SPARQL endpoint to find entities by label and get instance of
- * Returns map of label -> { qid, label, instanceOf }
+ * Returns map of name -> Map of QID -> { itemLabel, instanceOf[] }
+ * This handles cases like "Paris" which could match multiple entities (city, person, etc.)
  */
 export async function queryEntitiesByLabel(
   labels: string[],
   lang: string = PRIMARY_LANGUAGE
-): Promise<Map<string, { qid: string; label: string; instanceOf: string }>> {
-  const results = new Map<string, { qid: string; label: string; instanceOf: string }>();
+): Promise<Map<string, Map<string, LabelMatch>>> {
+  // Map<name, Map<QID, { itemLabel, instanceOf[] }>>
+  const labelToResults = new Map<string, Map<string, LabelMatch>>();
 
-  if (labels.length === 0) return results;
+  if (labels.length === 0) return labelToResults;
+
+  // for each label remove prefix numbers (.replace(/^\d+\.\s*/, '').trim())
+  labels = labels.map(label => label.replace(/^\d+\.\s*/, '').replace(/‡$/, '').trim());
 
   const batches = batchArray(labels, SPARQL_BATCH_SIZE);
 
@@ -521,10 +532,10 @@ export async function queryEntitiesByLabel(
       .join(' ');
 
     const query = `
-SELECT ?qid ?itemLabel ?instanceOfLabel
+SELECT ?qid ?name ?itemLabel ?instanceOfLabel
 WHERE {
   VALUES ?name { ${valuesClause} }
-  ?item rdfs:label ?name .
+  ?item (rdfs:label|skos:altLabel) ?name .
   OPTIONAL { ?item wdt:P31 ?instanceOf . }
 
   BIND(STRAFTER(STR(?item), "http://www.wikidata.org/entity/") AS ?qid)
@@ -549,31 +560,49 @@ WHERE {
       }
 
       const data: SparqlResponse = await response.json();
+      if (LOG_LEVEL > 1) console.log('WikiColumn: SPARQL query returned', data.results.bindings.length, 'results', data.results.bindings);
 
       for (const binding of data.results.bindings) {
         const qid = binding.qid.value;
-        const label = binding.itemLabel.value;
+        const name = binding.name.value;
+        const itemLabel = binding.itemLabel?.value || name;
         const instanceOf = binding.instanceOfLabel?.value || '';
 
         // Store by the original search label (case-insensitive match)
         const matchingLabel = batch.find(
-          (l) => l.toLowerCase() === label.toLowerCase()
+          (l) => l.toLowerCase() === name.toLowerCase()
         );
 
-        if (matchingLabel && !results.has(matchingLabel)) {
-          results.set(matchingLabel, {
-            qid,
-            label,
-            instanceOf,
-          });
+        if (LOG_LEVEL > 2) console.log(`WikiColumn: SPARQL matched name "${name}" to QID ${qid} (instance of: ${instanceOf})`, matchingLabel);
+
+        if (matchingLabel) {
+          // Get or create the QID map for this label
+          if (!labelToResults.has(matchingLabel)) {
+            labelToResults.set(matchingLabel, new Map());
+          }
+          const qidMap = labelToResults.get(matchingLabel)!;
+
+          // Get or create the entry for this QID
+          if (!qidMap.has(qid)) {
+            qidMap.set(qid, {
+              itemLabel,
+              instanceOf: instanceOf ? [instanceOf] : [],
+            });
+          } else {
+            // Append instanceOf if not already present
+            const existing = qidMap.get(qid)!;
+            if (instanceOf && !existing.instanceOf.includes(instanceOf)) {
+              existing.instanceOf.push(instanceOf);
+            }
+          }
         }
       }
     } catch (error) {
       console.error('Error querying SPARQL:', error);
     }
   }
-
-  return results;
+  console.log(`WikiColumn: SPARQL query matched ${labelToResults.size} out of ${labels.length} labels`, labelToResults);
+  return labelToResults;
 }
 
 /**

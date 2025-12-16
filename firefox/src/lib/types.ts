@@ -165,7 +165,9 @@ export type MessageType =
   | 'INJECT_COLUMNS'
   | 'OPEN_SIDEBAR'
   | 'UPDATE_INSTANCE_OF'
-  | 'CONTEXT_MENU_ACTIVATED';
+  | 'CONTEXT_MENU_ACTIVATED'
+  | 'HIGHLIGHT_NOT_FOUND_ON'
+  | 'HIGHLIGHT_NOT_FOUND_OFF';
 
 export interface EditTablePayload {
   tableData: TableData;
@@ -218,6 +220,12 @@ export interface ContextMenuActivatedPayload {
   tabId: number;
 }
 
+export interface HighlightNotFoundPayload {
+  xpath: string;
+  labels: string[];
+  keyColumnIndex: number;
+}
+
 export type Message =
   | { type: 'EDIT_TABLE'; payload: EditTablePayload }
   | { type: 'ADD_COLUMN'; payload: AddColumnPayload }
@@ -227,6 +235,8 @@ export type Message =
   | { type: 'INJECT_COLUMNS'; payload: InjectColumnsPayload }
   | { type: 'UPDATE_INSTANCE_OF'; payload: UpdateInstanceOfPayload }
   | { type: 'CONTEXT_MENU_ACTIVATED'; payload: ContextMenuActivatedPayload }
+  | { type: 'HIGHLIGHT_NOT_FOUND_ON'; payload: HighlightNotFoundPayload }
+  | { type: 'HIGHLIGHT_NOT_FOUND_OFF'; payload: { xpath: string } }
   | { type: 'OPEN_SIDEBAR' };
 
 // ============================================================================

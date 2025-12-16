@@ -179,7 +179,7 @@ function findKeyColumn(table: HTMLTableElement): number {
   const headerRow = getHeaderRow(table);
   if (!headerRow) return -1;
 
-  const numCols = headerRow.querySelectorAll('th, td').length;
+  const numCols = headerRow.querySelectorAll('td').length;
 
   for (let colIndex = 0; colIndex < numCols; colIndex++) {
     if (columnHasWikipediaLinks(table, colIndex)) {
@@ -199,7 +199,7 @@ function addKeyIndicator(table: HTMLTableElement, colIndex: number): void {
   const headerRow = getHeaderRow(table);
   if (!headerRow) return;
 
-  const headerCells = headerRow.querySelectorAll('th, td');
+  const headerCells = headerRow.querySelectorAll('td');
   const headerCell = headerCells[colIndex] as HTMLTableCellElement | undefined;
 
   console.log("WikiColumn: addKeyIndicator: adding key indicator to column", colIndex);
@@ -268,7 +268,7 @@ function extractTableData(table: HTMLTableElement): TableData {
   const dataRows = getDataRows(table);
   dataRows.forEach((row) => {
     const rowData: CellData[] = [];
-    const cells = row.querySelectorAll('td, th');
+    const cells = row.querySelectorAll('td');
     cells.forEach((cell) => {
       rowData.push(extractCellData(cell as HTMLTableCellElement));
     });
@@ -278,7 +278,14 @@ function extractTableData(table: HTMLTableElement): TableData {
   });
 
   const xpath = getXPath(table);
-  const tableTitle = findNearestHeading(table);
+
+  const tableCaption = table.querySelector('caption');
+  let tableTitle = '';
+  if (!tableCaption || tableCaption.textContent?.trim() === '') {
+    tableTitle = findNearestHeading(table);
+  } else {
+    tableTitle = tableCaption.textContent?.trim() || '';
+  }
 
   return {
     headers,
@@ -433,6 +440,48 @@ function updateKeyColumnWithInstanceOf(
 }
 
 /**
+ * Highlight key column cells that weren't matched to Wikidata
+ * Uses substring matching on the label
+ */
+function highlightUnmatchedCells(table: HTMLTableElement, labels: string[], keyColumnIndex: number): void {
+  const dataRows = getDataRows(table);
+
+  console.log("WikiColumn: highlightUnmatchedCells: highlighting unmatched cells in column", keyColumnIndex, "with labels:", labels);
+
+  dataRows.forEach((row) => {
+    const cells = row.querySelectorAll('td');
+    const keyCell = cells[keyColumnIndex] as HTMLTableCellElement | undefined;
+
+    if (!keyCell) return;
+
+    const cellText = keyCell.textContent?.toLowerCase() || '';
+
+    // Check if this key cell's text matches any unmatched label
+    const isUnmatched = labels.some((label) =>
+      cellText.includes(label.toLowerCase())
+    );
+
+    if (isUnmatched) {
+      keyCell.classList.add('wikicolumn-unmatched-cell');
+      keyCell.style.backgroundColor = 'rgb(255, 228, 230)'; // rose
+      keyCell.style.fontStyle = 'italic';
+    }
+  });
+}
+
+/**
+ * Remove highlight styling from cells
+ */
+function removeHighlights(table: HTMLTableElement): void {
+  const highlightedCells = table.querySelectorAll('.wikicolumn-unmatched-cell');
+  highlightedCells.forEach((cell) => {
+    cell.classList.remove('wikicolumn-unmatched-cell');
+    (cell as HTMLElement).style.backgroundColor = '';
+    (cell as HTMLElement).style.fontStyle = '';
+  });
+}
+
+/**
  * Re-inject saved columns on page load
  */
 async function reinjectSavedColumns(): Promise<void> {
@@ -534,6 +583,24 @@ browser.runtime.onMessage.addListener(
           sendResponse({ success: true });
         } else {
           sendResponse({ error: 'Table not found' });
+        }
+        break;
+      }
+
+      case 'HIGHLIGHT_NOT_FOUND_ON': {
+        const payload = message.payload as { xpath: string; labels: string[]; keyColumnIndex: number };
+        const table = getNodeFromXPath(payload.xpath, document) as HTMLTableElement;
+        if (table && table.tagName === 'TABLE') {
+          highlightUnmatchedCells(table, payload.labels, payload.keyColumnIndex);
+        }
+        break;
+      }
+
+      case 'HIGHLIGHT_NOT_FOUND_OFF': {
+        const payload = message.payload as { xpath: string };
+        const table = getNodeFromXPath(payload.xpath, document) as HTMLTableElement;
+        if (table && table.tagName === 'TABLE') {
+          removeHighlights(table);
         }
         break;
       }

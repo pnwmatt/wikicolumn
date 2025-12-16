@@ -23,7 +23,7 @@ import {
   getInstanceOfLabels,
 } from '../lib/wikidata';
 
-const LOG_LEVEL = 2;
+const LOG_LEVEL = 5;
 
 // DOM Elements
 const emptyState = document.getElementById('emptyState')!;
@@ -296,7 +296,7 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   currentTableData.rows.forEach((row, rowIndex) => {
     const cell = row[keyColumnIndex];
     if (cell && cell.text.trim()) {
-      const label = cell.text.trim();
+      const label = cell.text.replace(/^\d+\.\s*/, '').replace(/‡$/, '').trim();
       labels.push(label);
       rowToLabel.set(rowIndex, label);
     }
@@ -304,16 +304,67 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
 
   // Get QIDs from labels using SPARQL
   setLoadingMessage('Searching Wikidata by label...');
-  const labelToEntity = await queryEntitiesByLabel(labels, PRIMARY_LANGUAGE);
+  const labelToQidMap = await queryEntitiesByLabel(labels, PRIMARY_LANGUAGE);
+
+  // Determine the primary instanceOf by creating a dictionary of instanceOf scores.
+  // The score is calculated by determining the COUNT of how many instancesOf per QID and incrementing
+  // the score by 1 for each QID.
+  setLoadingMessage('Analyzing entity types...');
+
+  // Get instance of labels for all matched QIDs
+  if (labelToQidMap.size > 0) {
+
+    // Calculate scores for each instanceOf type
+    const instanceOfScores = new Map<string, number>();
+    for (const qidMap of labelToQidMap.values()) {
+      for (const labelMatch of qidMap.values()) {
+        // labelMatch is { itemLabel, instanceOf[] }
+        for (const instanceType of labelMatch.instanceOf) {
+          if (instanceType) {
+            instanceOfScores.set(instanceType, (instanceOfScores.get(instanceType) || 0) + 1);
+          }
+        }
+      }
+    }
+
+    // Find the highest score(s)
+    const maxScore = Math.max(...instanceOfScores.values());
+    const primaryInstanceTypes = Array.from(instanceOfScores.entries())
+      .filter(([_, score]) => score === maxScore)
+      .map(([type, _]) => type);
+
+    if (LOG_LEVEL > 1) {
+      console.log('WikiColumn: InstanceOf scores:', Object.fromEntries(instanceOfScores));
+      console.log('WikiColumn: Primary instance types:', primaryInstanceTypes);
+    }
+  }
+
+
 
   // Build row matches
   rowMatches = currentTableData.rows.map((_, rowIndex) => {
     const label = rowToLabel.get(rowIndex);
-    const entity = label ? labelToEntity.get(label) : undefined;
+
+    // strip prefix number and period from label if present
+    const strippedLabel = label ? label.replace(/^\d+\.\s*/, '').replace(/‡$/, '').trim() : label;
+
+    const qidMap = strippedLabel ? labelToQidMap.get(strippedLabel) : undefined;
+
+    // For now, pick the first QID (TODO: add disambiguation UI)
+    let qid: string | null = null;
+    let itemLabel: string | undefined;
+    if (qidMap && qidMap.size > 0) {
+      const firstEntry = qidMap.entries().next().value;
+      if (firstEntry) {
+        qid = firstEntry[0];
+        itemLabel = firstEntry[1].itemLabel;
+      }
+    }
+
     return {
       rowIndex,
-      qid: entity?.qid || null,
-      label: entity?.label || label,
+      qid,
+      label: itemLabel || label,
     };
   });
 
@@ -577,6 +628,51 @@ propertySearch.addEventListener('input', () => {
 propertyModal.addEventListener('click', (e) => {
   if (e.target === propertyModal) {
     closePropertyModal();
+  }
+});
+
+// Highlight unmatched rows on hover
+matchingStatus.addEventListener('mouseenter', async () => {
+  if (!currentTableData || !currentTableRecord || !rowMatches.length) {
+    console.error('WikiColumn: No table data or row matches available for highlighting.', { currentTableData, currentTableRecord, rowMatches });
+    return;
+  } else {
+    if (LOG_LEVEL > 1) console.log('WikiColumn: Preparing to highlight unmatched rows.', { currentTableData, currentTableRecord, rowMatches });
+  }
+
+  // Get labels of unmatched rows
+  const unmatchedLabels = rowMatches
+    .filter((match) => !match.qid)
+    .map((match) => match.label)
+    .filter((label): label is string => !!label);
+
+  if (unmatchedLabels.length === 0) return;
+
+  // Send message to content script
+  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tabs[0]?.id) {
+    browser.tabs.sendMessage(tabs[0].id, {
+      type: 'HIGHLIGHT_NOT_FOUND_ON',
+      payload: {
+        xpath: currentTableData.xpath,
+        labels: unmatchedLabels,
+        keyColumnIndex: currentTableRecord.keyColumnIndex,
+      },
+    });
+  }
+});
+
+matchingStatus.addEventListener('mouseleave', async () => {
+  if (!currentTableData) return;
+
+  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tabs[0]?.id) {
+    browser.tabs.sendMessage(tabs[0].id, {
+      type: 'HIGHLIGHT_NOT_FOUND_OFF',
+      payload: {
+        xpath: currentTableData.xpath,
+      },
+    });
   }
 });
 

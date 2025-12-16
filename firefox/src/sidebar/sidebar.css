@@ -475,3 +475,8 @@ body {
   min-width: 2rem;
   text-align: right;
 }
+
+.instance-type-checkbox {
+  margin-right: 0.5rem;
+  cursor: pointer;
+}

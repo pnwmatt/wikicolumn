@@ -242,12 +242,88 @@ function renderInstanceTypes(
 
     // Round score to 1 decimal place for display
     const displayScore = score % 1 === 0 ? score : score.toFixed(1);
+    const isChecked = selectedInstanceTypes.has(type);
+
     li.innerHTML = `
+      <input type="checkbox" class="instance-type-checkbox" data-type="${type}" ${isChecked ? 'checked' : ''}>
       <span class="instance-type-name">${type}</span>
       <span class="instance-type-score">${displayScore}</span>
     `;
 
+    // Add checkbox change handler
+    const checkbox = li.querySelector('.instance-type-checkbox') as HTMLInputElement;
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        selectedInstanceTypes.add(type);
+      } else {
+        selectedInstanceTypes.delete(type);
+      }
+      refilterRowMatches();
+    });
+
     instanceTypesList.appendChild(li);
+  }
+}
+
+// Re-filter row matches based on selected instance types
+async function refilterRowMatches(): Promise<void> {
+  if (!currentTableData || !storedLabelToQidMap) return;
+
+  // Rebuild row matches with instance type filter
+  rowMatches = currentTableData.rows.map((_, rowIndex) => {
+    const label = storedRowToLabel.get(rowIndex);
+    const strippedLabel = label ? label.replace(/^\d+\.\s*/, '').replace(/‡$/, '').trim() : label;
+    const qidMap = strippedLabel ? storedLabelToQidMap!.get(strippedLabel) : undefined;
+
+    let qid: string | null = null;
+    let itemLabel: string | undefined;
+
+    if (qidMap && qidMap.size > 0) {
+      // If no filters selected, use first QID (original behavior)
+      if (selectedInstanceTypes.size === 0) {
+        const firstEntry = qidMap.entries().next().value;
+        if (firstEntry) {
+          qid = firstEntry[0];
+          itemLabel = firstEntry[1].itemLabel;
+        }
+      } else {
+        // Filter QIDs to those with at least one selected instance type
+        for (const [thisQid, labelMatch] of qidMap.entries()) {
+          const hasSelectedType = labelMatch.instanceOf.some(
+            (type) => selectedInstanceTypes.has(type)
+          );
+          if (hasSelectedType) {
+            qid = thisQid;
+            itemLabel = labelMatch.itemLabel;
+            break; // Use first matching QID
+          }
+        }
+      }
+    }
+
+    return {
+      rowIndex,
+      qid,
+      label: itemLabel || label,
+    };
+  });
+
+  // Update matching progress
+  const matchedCount = rowMatches.filter((m) => m.qid).length;
+  updateMatchingProgress(matchedCount, rowMatches.length);
+
+  // Update status text
+  matchingStatus.textContent = matchedCount > 0
+    ? `${matchedCount} of ${rowMatches.length} rows matched`
+    : 'No matches found';
+
+  // Update instance of on page with new filtered data
+  if (currentTableRecord && storedLabelToQidMap) {
+    await updateInstanceOfOnPage(
+      storedKeyColumnIndex,
+      storedLabelToQidMap,
+      storedPrimaryInstanceTypes
+    );
   }
 }
 
@@ -390,6 +466,13 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
     console.log('WikiColumn: InstanceOf scores:', Object.fromEntries(instanceOfScores));
     console.log('WikiColumn: Primary instance types:', primaryInstanceTypes);
   }
+
+  // Store data for re-filtering when instance type checkboxes change
+  storedLabelToQidMap = labelToQidMap;
+  storedRowToLabel = rowToLabel;
+  storedKeyColumnIndex = keyColumnIndex;
+  storedPrimaryInstanceTypes = primaryInstanceTypes;
+  selectedInstanceTypes.clear(); // Reset filters for new table
 
   // Render the instance types in the sidebar
   renderInstanceTypes(instanceOfScores, primaryInstanceTypes);

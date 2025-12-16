@@ -20,7 +20,6 @@ import {
   parseClaims,
   getPropertyInfo,
   getClaimDisplayValues,
-  getInstanceOfLabels,
 } from '../lib/wikidata';
 
 const LOG_LEVEL = 5;
@@ -110,7 +109,7 @@ function renderColumns(): void {
     item.innerHTML = `
       <span class="column-letter">${col.letter}</span>
       <span class="column-name">${escapeHtml(col.header)}</span>
-      ${col.isKey ? '<span class="column-key-icon" title="Key column for Wikidata matching">🔑</span>' : ''}
+      ${col.isKey ? '<span class="column-key-icon" title="Key column for Wikidata matching"></span>' : ''}
       ${col.isWikidata ? `
         <div class="column-actions">
           <button class="column-action-btn delete" title="Remove column" data-property="${col.propertyId}">🗑️</button>
@@ -182,7 +181,11 @@ function renderPropertyList(searchQuery: string = ''): void {
       if ((e.target as HTMLElement).classList.contains('property-visibility-btn')) {
         return;
       }
-      addWikidataColumn(prop.pid, prop.label);
+      try {
+        addWikidataColumn(prop.pid, prop.label);
+      } catch (error) {
+        console.error('WikiColumn: Error adding Wikidata column after click:', error);
+      }
       closePropertyModal();
     });
 
@@ -296,7 +299,7 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   currentTableData.rows.forEach((row, rowIndex) => {
     const cell = row[keyColumnIndex];
     if (cell && cell.text.trim()) {
-      const label = cell.text.replace(/^\d+\.\s*/, '').replace(/‡$/, '').trim();
+      const label = cell.text.replace(/^\d+\.\s*/, '').replace(/(‡|§)$/, '').trim();
       labels.push(label);
       rowToLabel.set(rowIndex, label);
     }
@@ -311,32 +314,31 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   // the score by 1 for each QID.
   setLoadingMessage('Analyzing entity types...');
 
-  // Get instance of labels for all matched QIDs
-  if (labelToQidMap.size > 0) {
-
-    // Calculate scores for each instanceOf type
-    const instanceOfScores = new Map<string, number>();
-    for (const qidMap of labelToQidMap.values()) {
-      for (const labelMatch of qidMap.values()) {
-        // labelMatch is { itemLabel, instanceOf[] }
-        for (const instanceType of labelMatch.instanceOf) {
-          if (instanceType) {
-            instanceOfScores.set(instanceType, (instanceOfScores.get(instanceType) || 0) + 1);
-          }
+  // Calculate scores for each instanceOf type
+  const instanceOfScores = new Map<string, number>();
+  for (const qidMap of labelToQidMap.values()) {
+    for (const labelMatch of qidMap.values()) {
+      // labelMatch is { itemLabel, instanceOf[] }
+      for (const instanceType of labelMatch.instanceOf) {
+        if (instanceType) {
+          instanceOfScores.set(instanceType, (instanceOfScores.get(instanceType) || 0) + 1);
         }
       }
     }
+  }
 
-    // Find the highest score(s)
+  // Find the highest score(s) - these are the primary instance types
+  let primaryInstanceTypes: string[] = [];
+  if (instanceOfScores.size > 0) {
     const maxScore = Math.max(...instanceOfScores.values());
-    const primaryInstanceTypes = Array.from(instanceOfScores.entries())
+    primaryInstanceTypes = Array.from(instanceOfScores.entries())
       .filter(([_, score]) => score === maxScore)
       .map(([type, _]) => type);
+  }
 
-    if (LOG_LEVEL > 1) {
-      console.log('WikiColumn: InstanceOf scores:', Object.fromEntries(instanceOfScores));
-      console.log('WikiColumn: Primary instance types:', primaryInstanceTypes);
-    }
+  if (LOG_LEVEL > 1) {
+    console.log('WikiColumn: InstanceOf scores:', Object.fromEntries(instanceOfScores));
+    console.log('WikiColumn: Primary instance types:', primaryInstanceTypes);
   }
 
 
@@ -405,9 +407,9 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
     // Calculate property usage statistics
     await calculatePropertyStats(qids);
 
-    // Fetch instance of labels and update the page
-    setLoadingMessage('Fetching instance types...');
-    await updateInstanceOfOnPage(keyColumnIndex, qids);
+    // Update key column with filtered instance types
+    setLoadingMessage('Updating instance types...');
+    await updateInstanceOfOnPage(keyColumnIndex, labelToQidMap, primaryInstanceTypes);
   }
 
   // Enable add column button if we have matched rows
@@ -417,19 +419,36 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
     : 'No Wikipedia links found. Add Wikipedia links to enable Wikidata columns.';
 }
 
-// Fetch instance of labels and send to content script to update the page
-async function updateInstanceOfOnPage(keyColumnIndex: number, qids: string[]): Promise<void> {
-  if (!currentTableRecord) return;
-
-  // Get instance of labels for all QIDs
-  const instanceOfLabels = await getInstanceOfLabels(qids, PRIMARY_LANGUAGE);
+// Update key column cells with instance of labels (filtered to primary types)
+async function updateInstanceOfOnPage(
+  keyColumnIndex: number,
+  labelToQidMap: Map<string, Map<string, { itemLabel: string; instanceOf: string[] }>>,
+  primaryInstanceTypes: string[]
+): Promise<void> {
+  if (!currentTableRecord || !currentTableData) return;
 
   // Build row index -> instance of label map
   const instanceOfData: Record<number, string> = {};
 
   for (const match of rowMatches) {
-    if (match.qid && instanceOfLabels.has(match.qid)) {
-      instanceOfData[match.rowIndex] = instanceOfLabels.get(match.qid)!;
+    if (!match.qid || !match.label) continue;
+
+    // Find the label in labelToQidMap
+    const strippedLabel = match.label.replace(/^\d+\.\s*/, '').replace(/‡$/, '').trim();
+    const qidMap = labelToQidMap.get(strippedLabel);
+    if (!qidMap) continue;
+
+    // Get the instanceOf for this QID
+    const labelMatch = qidMap.get(match.qid);
+    if (!labelMatch) continue;
+
+    // Filter to only include primary instance types
+    const filteredTypes = labelMatch.instanceOf.filter(
+      (type) => primaryInstanceTypes.includes(type)
+    );
+
+    if (filteredTypes.length > 0) {
+      instanceOfData[match.rowIndex] = filteredTypes.join(', ');
     }
   }
 
@@ -507,6 +526,8 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
     }
   }
 
+  console.log("WikiColumn: Adding Wikidata column:", propertyId, label, relevantClaims);
+
   // Get display values for claims
   const displayValues = await getClaimDisplayValues(relevantClaims, PRIMARY_LANGUAGE);
 
@@ -530,6 +551,7 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
         label
       )
     : label;
+  if (LOG_LEVEL > 2) console.log("WikiColumn: Generated header HTML for new column:", headerHtml, label, originalHeader);
 
   // Add column to table record
   const newColumn = {
@@ -545,7 +567,7 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
   columns.push({
     letter: indexToLetter(columns.length),
     index: columns.length,
-    header: label,
+    header: label.toLocaleUpperCase(),
     isKey: false,
     isWikidata: true,
     propertyId,
@@ -561,7 +583,7 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
       values,
     }],
   };
-
+  console.log('WikiColumn: Injecting column with payload:', injectPayload, currentTabId);
   try {
     await browser.tabs.sendMessage(currentTabId, {
       type: 'INJECT_COLUMNS',
@@ -681,15 +703,27 @@ browser.runtime.onMessage.addListener((message: Message) => {
   if (message.type === 'EDIT_TABLE') {
     loadTable(message.payload as EditTablePayload);
   }
-  else if (message.type === 'CONTEXT_MENU_ACTIVATED') {
-    const { tabId } = message.payload;
-    currentTabId = tabId;
-  }
   return true;
 });
 
-// Initialize
-showState('empty');
-db.init().then(() => {
-  console.log('WikiColumn sidebar initialized');
+// Track active tab changes
+browser.tabs.onActivated.addListener((activeInfo) => {
+  currentTabId = activeInfo.tabId;
+  if (LOG_LEVEL > 1) console.log('WikiColumn: Active tab changed to', currentTabId);
 });
+
+// Initialize
+async function init(): Promise<void> {
+  showState('empty');
+  await db.init();
+
+  // Get the current active tab
+  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tabs[0]?.id) {
+    currentTabId = tabs[0].id;
+  }
+
+  console.log('WikiColumn sidebar initialized, active tab:', currentTabId);
+}
+
+init();

@@ -468,16 +468,22 @@ export async function getClaimDisplayValues(
     }
     const qidMap = results.get(claim.qid)!;
 
-    // Get display value for first value (primary value)
-    const firstValue = claim.values[0];
-    if (firstValue) {
+    // Get display values for all values, comma-separated
+    const displayValues: string[] = [];
+    for (const value of claim.values) {
       let displayValue: string;
-      if (firstValue.type === 'wikibase-item' && firstValue.qid) {
-        displayValue = labels.get(firstValue.qid) || firstValue.qid;
+      if (value.type === 'wikibase-item' && value.qid) {
+        displayValue = labels.get(value.qid) || value.qid;
       } else {
-        displayValue = firstValue.value;
+        displayValue = value.value;
       }
-      qidMap.set(claim.pid, displayValue);
+      if (displayValue && !displayValues.includes(displayValue)) {
+        displayValues.push(displayValue);
+      }
+    }
+
+    if (displayValues.length > 0) {
+      qidMap.set(claim.pid, displayValues.join(', '));
     }
   }
 

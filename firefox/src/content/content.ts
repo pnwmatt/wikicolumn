@@ -205,11 +205,11 @@ function addKeyIndicator(table: HTMLTableElement, colIndex: number): void {
   console.log("WikiColumn: addKeyIndicator: adding key indicator to column", colIndex);
 
   if (headerCell && !headerCell.querySelector('.wikicolumn-key-indicator')) {
-    const keySpan = document.createElement('span');
-    keySpan.className = 'wikicolumn-key-indicator';
-    keySpan.textContent = ' 🔑';
-    keySpan.title = 'WikiColumn key column (has Wikipedia links)';
-    headerCell.appendChild(keySpan);
+    //const keySpan = document.createElement('span');
+    //keySpan.className = 'wikicolumn-key-indicator';
+    //keySpan.textContent = ' 🔑';
+    //keySpan.title = 'WikiColumn key column (has Wikipedia links)';
+    //headerCell.appendChild(keySpan);
   }
 }
 
@@ -374,6 +374,7 @@ function injectColumn(
   propertyId: string
 ): void {
   const xpath = getXPath(table);
+  console.log("WikiColumn: injectColumn: injecting column", propertyId, "into table", xpath, "with values", values);
 
   const existing = injectedColumnsByTable.get(xpath) || [];
   existing.push(propertyId);

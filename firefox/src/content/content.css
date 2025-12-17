@@ -64,3 +64,11 @@ table.wikicolumn-enabled:hover .wikicolumn-menu-btn {
 table.wikicolumn-enabled {
   /* Subtle indicator - can be customized */
 }
+
+.wikicolumn-unmatched-row {
+  background-color: rgb(255, 228, 230); /* rose */
+}
+
+.wikicolumn-matched-row {
+  display: none;
+}

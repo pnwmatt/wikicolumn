@@ -197,6 +197,18 @@ body {
   flex-shrink: 0;
 }
 
+.column-key-icon::before {
+  content: '🔑';
+}
+
+.column-item.key-column {
+  background: var(--accent-blue10);
+}
+
+.column-item:not(.wikidata-column):not(.key-column):hover {
+  background: var(--fill-quinary);
+}
+
 .column-actions {
   display: flex;
   gap: 0.25rem;

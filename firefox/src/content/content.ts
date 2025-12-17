@@ -215,11 +215,11 @@ function addKeyIndicator(table: HTMLTableElement, colIndex: number): void {
   console.log("WikiColumn: addKeyIndicator: adding key indicator to column", colIndex);
 
   if (headerCell && !headerCell.querySelector('.wikicolumn-key-indicator')) {
-    //const keySpan = document.createElement('span');
-    //keySpan.className = 'wikicolumn-key-indicator';
-    //keySpan.textContent = ' 🔑';
-    //keySpan.title = 'WikiColumn key column (has Wikipedia links)';
-    //headerCell.appendChild(keySpan);
+    const keySpan = document.createElement('span');
+    keySpan.className = 'wikicolumn-key-indicator';
+    keySpan.textContent = ' 🔑';
+    keySpan.title = 'WikiColumn key column (has Wikipedia links)';
+    headerCell.appendChild(keySpan);
   }
 }
 
@@ -346,7 +346,7 @@ function processTable(table: HTMLTableElement): void {
     return;
   }
 
-  // Find key column (leftmost with Wikipedia links)
+  // Find key column
   const keyColIndex = findKeyColumn(table);
 
   if (keyColIndex >= 0) {
@@ -490,9 +490,9 @@ function highlightUnmatchedCells(table: HTMLTableElement, labels: string[], keyC
     );
 
     if (isUnmatched) {
-      keyCell.classList.add('wikicolumn-unmatched-cell');
-      keyCell.style.backgroundColor = 'rgb(255, 228, 230)'; // rose
-      keyCell.style.fontStyle = 'italic';
+      (keyCell.parentNode as HTMLElement)?.classList.add('wikicolumn-unmatched-row');
+    } else {
+      (keyCell.parentNode as HTMLElement)?.classList.add('wikicolumn-matched-row');
     }
   });
 }
@@ -501,11 +501,10 @@ function highlightUnmatchedCells(table: HTMLTableElement, labels: string[], keyC
  * Remove highlight styling from cells
  */
 function removeHighlights(table: HTMLTableElement): void {
-  const highlightedCells = table.querySelectorAll('.wikicolumn-unmatched-cell');
+  const highlightedCells = table.querySelectorAll('.wikicolumn-unmatched-row, .wikicolumn-matched-row');
   highlightedCells.forEach((cell) => {
-    cell.classList.remove('wikicolumn-unmatched-cell');
-    (cell as HTMLElement).style.backgroundColor = '';
-    (cell as HTMLElement).style.fontStyle = '';
+    cell.classList.remove('wikicolumn-unmatched-row');
+    cell.classList.remove('wikicolumn-matched-row');
   });
 }
 

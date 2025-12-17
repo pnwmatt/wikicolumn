@@ -111,7 +111,7 @@ function renderColumns(): void {
 
   columns.forEach((col) => {
     const item = document.createElement('div');
-    item.className = `column-item${col.isWikidata ? ' wikidata-column' : ''}`;
+    item.className = `column-item${col.isWikidata ? ' wikidata-column' : ''}${col.isKey ? ' key-column' : ''}`;
     item.draggable = true;
     item.dataset.index = col.index.toString();
 
@@ -138,8 +138,42 @@ function renderColumns(): void {
       });
     }
 
+    // Handle click on non-Wikidata columns to switch key column
+    if (!col.isWikidata && !col.isKey) {
+      item.style.cursor = 'pointer';
+      item.title = 'Click to set as key column';
+      item.addEventListener('click', () => {
+        switchKeyColumn(col.index);
+      });
+    }
+
     columnsList.appendChild(item);
   });
+}
+
+// Switch the key column and re-run Wikidata matching
+async function switchKeyColumn(newKeyIndex: number): Promise<void> {
+  if (!currentTableData || !currentTableRecord) return;
+
+  // Update columns array
+  columns = columns.map((col) => ({
+    ...col,
+    isKey: col.index === newKeyIndex,
+  }));
+
+  // Update table record
+  currentTableRecord.keyColumnIndex = newKeyIndex;
+  currentTableRecord.updatedAt = new Date().toISOString();
+  await db.saveTable(currentTableRecord);
+
+  // Re-render columns
+  renderColumns();
+
+  // Show loading state and re-run matching
+  showState('loading');
+  setLoadingMessage('Switching key column...');
+  await matchWikidata(newKeyIndex);
+  showState('editor');
 }
 
 // Update matching progress UI

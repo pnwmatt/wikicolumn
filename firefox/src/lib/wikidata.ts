@@ -14,7 +14,7 @@ import {
 } from './types';
 import { db } from './database';
 
-const LOG_LEVEL = 5;
+const LOG_LEVEL = 0;
 
 const WIKIDATA_API = 'https://www.wikidata.org/w/api.php';
 const WIKIDATA_SPARQL = 'https://query.wikidata.org/sparql';
@@ -113,6 +113,7 @@ export async function getQIDsFromWikipediaUrls(
       });
 
       try {
+        console.error("Calling out to WIKIDATA_API in getQIDsFromWikipediaUrls");
         const response = await fetch(`${WIKIDATA_API}?${params}`);
         const data: WikidataApiResponse = await response.json();
 
@@ -169,6 +170,7 @@ export async function getEntityData(
     });
 
     try {
+      console.error("Calling out to WIKIDATA_API at getEntityData");
       const response = await fetch(`${WIKIDATA_API}?${params}`);
       const data: WikidataApiResponse = await response.json();
 
@@ -195,14 +197,16 @@ export async function getEntityData(
 }
 
 /**
- * Get labels for multiple QIDs or PIDs
+ * Get labels for multiple QIDs or PIDs (uncached - use getCachedLabels instead)
  * Returns map of ID -> label
  */
-export async function getLabels(
+async function getLabels(
   ids: string[],
   lang: string = PRIMARY_LANGUAGE
 ): Promise<Map<string, string>> {
   const results = new Map<string, string>();
+  if (ids.length === 0) return results;
+
   const batches = batchArray(ids, BATCH_SIZE);
 
   for (const batch of batches) {
@@ -217,6 +221,7 @@ export async function getLabels(
     });
 
     try {
+      console.error("Calling out to WIKIDATA_API at getLabels");
       const response = await fetch(`${WIKIDATA_API}?${params}`);
       const data: WikidataApiResponse = await response.json();
 
@@ -228,6 +233,71 @@ export async function getLabels(
       }
     } catch (error) {
       console.error('Error fetching labels:', error);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Get labels with caching - checks items and properties cache first
+ * Returns map of ID -> label
+ */
+export async function getCachedLabels(
+  ids: string[],
+  lang: string = PRIMARY_LANGUAGE
+): Promise<Map<string, string>> {
+  const results = new Map<string, string>();
+  if (ids.length === 0) return results;
+
+  const LOG_LEVEL = 5;
+
+  const uncachedIds: string[] = [];
+
+  // Separate QIDs and PIDs
+  const qids = ids.filter(id => id.startsWith('Q'));
+  const pids = ids.filter(id => id.startsWith('P'));
+
+  if (LOG_LEVEL > 1) console.log(`WikiColumn: Getting cached labels for ${ids.length} IDs (${qids.length} QIDs, ${pids.length} PIDs)`);
+
+
+  // Check items cache for QIDs
+  if (qids.length > 0) {
+    const { fresh: freshItems, stale: staleQids } = await db.getFreshItems(qids);
+    if (LOG_LEVEL > 1) console.log(`WikiColumn: Found ${freshItems.size} fresh items in cache for labels, stale`, staleQids);
+    for (const [qid, item] of freshItems) {
+      // Extract label from cached entity JSON
+      const label = item.json?.labels?.[lang]?.value || item.label || qid;
+      results.set(qid, label);
+    }
+    uncachedIds.push(...staleQids);
+  }
+
+  // Check properties cache for PIDs
+  if (pids.length > 0) {
+    const { fresh: freshProps, stale: stalePids } = await db.getFreshProperties(pids);
+    for (const [pid, prop] of freshProps) {
+      results.set(pid, prop.label || pid);
+    }
+    uncachedIds.push(...stalePids);
+  }
+
+  if (LOG_LEVEL > 1) {
+    console.log(`WikiColumn: Labels cache hit: ${results.size}/${ids.length}, fetching ${uncachedIds.length} uncached`);
+  }
+
+  // Fetch uncached labels from API
+  if (uncachedIds.length > 0) {
+    const fetchedLabels = await getLabels(uncachedIds, lang);
+    console.log(`WikiColumn: Fetched ${fetchedLabels.size} labels from API for uncached IDs`, fetchedLabels);
+    for (const [id, label] of fetchedLabels) {
+      results.set(id, label);
+
+
+      db.saveItem({
+        qid: id,
+        label,
+      });
     }
   }
 
@@ -416,6 +486,7 @@ export async function getPropertyInfo(
     });
 
     try {
+      console.error("Calling out to WIKIDATA_API at getPropertyInfo");
       const response = await fetch(`${WIKIDATA_API}?${params}`);
       const data: WikidataApiResponse = await response.json();
 
@@ -448,6 +519,7 @@ export async function getClaimDisplayValues(
   claims: Claim[],
   lang: string = PRIMARY_LANGUAGE
 ): Promise<Map<string, Map<string, string>>> {
+
   // Collect all QIDs that need labels
   const qidsToFetch = new Set<string>();
   for (const claim of claims) {
@@ -458,8 +530,10 @@ export async function getClaimDisplayValues(
     }
   }
 
+  console.log(`WikiColumn: Fetching labels for ${qidsToFetch.size} QIDs used in claims`);
+
   // Fetch labels for all QIDs
-  const labels = await getLabels([...qidsToFetch], lang);
+  const labels = await getCachedLabels([...qidsToFetch], lang);
 
   // Build result map: qid -> pid -> display value
   const results = new Map<string, Map<string, string>>();
@@ -737,6 +811,7 @@ export async function getCachedPropertyInfo(
   pids: string[],
   lang: string = PRIMARY_LANGUAGE
 ): Promise<Map<string, WikidataProperty>> {
+  const LOG_LEVEL = 5;
   if (pids.length === 0) return new Map();
 
   // Check cache for fresh properties
@@ -753,6 +828,10 @@ export async function getCachedPropertyInfo(
 
   // Fetch stale properties from API
   const fetched = await getPropertyInfo(stale, lang);
+
+  if (LOG_LEVEL > 1) {
+    console.log(`WikiColumn: Fetched ${fetched.size} properties from API`, fetched);
+  }
 
   // Save fetched properties to cache
   if (fetched.size > 0) {
@@ -774,6 +853,7 @@ export async function getCachedEntitiesByLabel(
   labels: string[],
   lang: string = PRIMARY_LANGUAGE
 ): Promise<Map<string, Map<string, LabelMatch>>> {
+  const LOG_LEVEL = 5;
   if (labels.length === 0) return new Map();
 
   // Normalize labels (same preprocessing as queryEntitiesByLabel)
@@ -812,6 +892,7 @@ export async function getCachedEntitiesByLabel(
   // Convert fetched results to cache entries and save
   const cacheEntries: LabelCacheEntry[] = [];
   for (const [label, qidMap] of fetched) {
+
     const resultsRecord: Record<string, { itemLabel: string; instanceOf: string[] }> = {};
     for (const [qid, data] of qidMap) {
       resultsRecord[qid] = {
@@ -819,6 +900,7 @@ export async function getCachedEntitiesByLabel(
         instanceOf: data.instanceOf,
       };
     }
+    if (LOG_LEVEL > 2) console.log(`WikiColumn: Caching SPARQL results for label "${label}"`, qidMap, resultsRecord);
     cacheEntries.push({
       label,
       results: resultsRecord,

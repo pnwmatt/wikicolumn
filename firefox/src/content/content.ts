@@ -44,7 +44,7 @@
  * - HIGHLIGHT_NOT_FOUND_OFF → removeHighlights()
  * - GET_ELIGIBLE_TABLES → getEligibleTables()
  * - EXTRACT_TABLE → extractTableData()
- * - SCROLL_TO_TABLE → scrollIntoView()
+ * - SCROLL_TO_TABLE → scrollToTable() (scroll to it and give border)
  *
  * @module content
  */
@@ -94,7 +94,7 @@ document.addEventListener('contextmenu', (e) => {
 });
 
 /** Logging verbosity (0 = errors only, 5 = verbose) */
-const LOG_LEVEL = 5;
+const LOG_LEVEL = 0;
 
 // ============================================================================
 // URL Helper Functions
@@ -1168,14 +1168,13 @@ browser.runtime.onMessage.addListener(
         const scrollPayload = message.payload as { xpath: string };
         const table = getNodeFromXPath(scrollPayload.xpath, document) as HTMLTableElement;
         if (table && table.tagName === 'TABLE') {
+
           table.scrollIntoView({ behavior: 'smooth', block: 'start' });
           // Add a brief highlight effect
-          table.style.outline = '3px solid #4a90d9';
-          table.style.outlineOffset = '2px';
+          table.classList.add('wikicolumn-scroll-highlight');
           setTimeout(() => {
-            table.style.outline = '';
-            table.style.outlineOffset = '';
-          }, 2000);
+            table.classList.remove('wikicolumn-scroll-highlight');
+          }, 7000);
           return Promise.resolve({ success: true });
         }
         return Promise.resolve({ error: 'Table not found' });

@@ -36,8 +36,8 @@ export interface WikidataItem {
   qid: string;
   label: string;
   description?: string;
-  json: WikidataEntity;
-  cachedAt?: number; // Timestamp for TTL checking
+  json?: WikidataEntity;
+  cachedAt: number; // Timestamp for TTL checking
 }
 
 export interface WikidataProperty {
@@ -181,7 +181,7 @@ export type MessageType =
   | 'HIGHLIGHT_NOT_FOUND_OFF'
   | 'GET_ELIGIBLE_TABLES'
   | 'ELIGIBLE_TABLES_RESPONSE'
-  | 'SCROLL_TO_TABLE';
+  | 'EDIT_TABLE';
 
 export interface EditTablePayload {
   tableData: TableData;

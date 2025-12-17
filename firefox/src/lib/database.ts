@@ -273,6 +273,7 @@ class WikiColumnDB {
   }
 
   async saveProperties(properties: WikidataProperty[]): Promise<void> {
+    const LOG_LEVEL = 5;
     const db = await this.init();
     const transaction = db.transaction(STORES.PROPERTIES, 'readwrite');
     const store = transaction.objectStore(STORES.PROPERTIES);
@@ -284,12 +285,8 @@ class WikiColumnDB {
 
       for (const property of properties) {
         // Check if exists first (INSERT OR IGNORE)
-        const getReq = store.get(property.pid);
-        getReq.onsuccess = () => {
-          if (!getReq.result) {
-            store.put({ ...property, cachedAt: now });
-          }
-        };
+        if (LOG_LEVEL > 2) console.log(`WikiColumn: Saving to cache property ${property.pid}`);
+        store.put({ ...property, cachedAt: now });
       }
     });
   }

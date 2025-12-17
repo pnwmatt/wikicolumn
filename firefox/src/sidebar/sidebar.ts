@@ -23,7 +23,7 @@ import {
   getClaimDisplayValues,
 } from '../lib/wikidata';
 
-const LOG_LEVEL = 5;
+const LOG_LEVEL = 0;
 
 // DOM Elements
 const tablePicker = document.getElementById('tablePicker')!;
@@ -466,16 +466,18 @@ async function selectTable(xpath: string): Promise<void> {
     }) as { tableData?: TableData; url?: string; error?: string };
 
     if (response && response.tableData) {
+      // Scroll to the table on the page
+      browser.tabs.sendMessage(currentTabId, {
+        type: 'SCROLL_TO_TABLE',
+        payload: { xpath },
+      });
+
       await loadTable({
         tableData: response.tableData,
         url: response.url || currentUrl,
         tabId: currentTabId,
       });
-      // Scroll to the table on the page
-      await browser.tabs.sendMessage(currentTabId, {
-        type: 'SCROLL_TO_TABLE',
-        payload: { xpath },
-      });
+
     } else {
       console.error('WikiColumn: Failed to extract table:', response?.error);
       showState('picker');
@@ -1026,6 +1028,29 @@ browser.tabs.onActivated.addListener(async (activeInfo) => {
   if (tablePicker.style.display !== 'none') {
     await requestEligibleTables();
   }
+});
+
+// Track tab refreshes/reloads
+browser.tabs.onUpdated.addListener(async (tabId, changeInfo, _tab) => {
+  // Only respond to the active tab completing a load
+  if (tabId !== currentTabId || changeInfo.status !== 'complete') {
+    return;
+  }
+
+  if (LOG_LEVEL > 1) console.log('WikiColumn: Tab refreshed, resetting sidebar');
+
+  // Reset state and go back to picker
+  currentTableData = null;
+  currentTableRecord = null;
+  rowMatches = [];
+  availableProperties = [];
+  columns = [];
+  storedLabelToQidMap = null;
+  storedRowToLabel.clear();
+  selectedInstanceTypes.clear();
+
+  showState('picker');
+  await requestEligibleTables();
 });
 
 // Initialize

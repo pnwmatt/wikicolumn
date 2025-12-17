@@ -430,7 +430,7 @@ body {
 }
 
 .modal-search {
-  margin-bottom: 0.75rem;
+  margin: 1rem 0 0.75rem 0;
 }
 
 .modal-search input {
@@ -544,6 +544,7 @@ body {
   list-style: none;
   margin: 0;
   padding: 0 1rem;
+  margin: 1rem 0;
 }
 
 .instance-type-item {

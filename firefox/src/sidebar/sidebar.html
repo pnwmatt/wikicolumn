@@ -11,12 +11,23 @@
 <body>
   <div id="mainSidebar" class="sidebar">
 
-    <!-- Empty state -->
-    <div id="emptyState" class="empty-state">
+    <!-- Table Picker (default view) -->
+    <div id="tablePicker" class="table-picker">
+      <div class="table-picker-header">
+        <h2>Select a Table</h2>
+        <p id="tablePickerStatus" class="table-picker-status">Scanning page for tables...</p>
+      </div>
+      <div id="tablePickerList" class="table-picker-list">
+        <!-- Tables will be rendered here -->
+      </div>
+    </div>
+
+    <!-- Empty state (no eligible tables) -->
+    <div id="emptyState" class="empty-state" style="display: none;">
       <div class="empty-state-content">
         <div class="empty-state-icon">&#128203;</div>
-        <h3>No table selected</h3>
-        <p>Right-click on any table and select "Edit with WikiColumn" to add Wikidata columns.</p>
+        <h3>No tables found</h3>
+        <p>This page doesn't have any tables with headers that can be enhanced with Wikidata.</p>
       </div>
     </div>
 
@@ -30,6 +41,7 @@
     <div id="tableEditor" class="table-editor" style="display: none;">
       <!-- Table info header -->
       <div class="table-info">
+        <button id="backToPickerBtn" class="back-btn" title="Back to table list">← Back</button>
         <h3 id="tableTitle" class="table-title">Table</h3>
         <p id="tableStats" class="table-stats"></p>
       </div>

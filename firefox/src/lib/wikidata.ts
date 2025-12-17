@@ -10,7 +10,9 @@ import {
   type WikidataTimeValue,
   type WikidataQuantityValue,
   type WikidataCoordinateValue,
+  type LabelCacheEntry,
 } from './types';
+import { db } from './database';
 
 const LOG_LEVEL = 5;
 
@@ -682,6 +684,166 @@ WHERE {
     } catch (error) {
       console.error('Error querying SPARQL for instance of:', error);
     }
+  }
+
+  return results;
+}
+
+// ============================================================================
+// Cached API Functions (with 24-hour TTL)
+// ============================================================================
+
+/**
+ * Get entity data with caching - checks cache first, fetches only stale data
+ */
+export async function getCachedEntityData(
+  qids: string[],
+  lang: string = PRIMARY_LANGUAGE
+): Promise<Map<string, WikidataItem>> {
+  if (qids.length === 0) return new Map();
+
+  // Check cache for fresh items
+  const { fresh, stale } = await db.getFreshItems(qids);
+
+  if (LOG_LEVEL > 1) {
+    console.log(`WikiColumn: Entity cache hit: ${fresh.size}/${qids.length}, fetching ${stale.length} stale`);
+  }
+
+  // If all items are fresh, return from cache
+  if (stale.length === 0) {
+    return fresh;
+  }
+
+  // Fetch stale items from API
+  const fetched = await getEntityData(stale, lang);
+
+  // Save fetched items to cache
+  if (fetched.size > 0) {
+    await db.saveItems([...fetched.values()]);
+  }
+
+  // Merge fresh cached items with newly fetched items
+  for (const [qid, item] of fetched) {
+    fresh.set(qid, item);
+  }
+
+  return fresh;
+}
+
+/**
+ * Get property info with caching - checks cache first, fetches only stale data
+ */
+export async function getCachedPropertyInfo(
+  pids: string[],
+  lang: string = PRIMARY_LANGUAGE
+): Promise<Map<string, WikidataProperty>> {
+  if (pids.length === 0) return new Map();
+
+  // Check cache for fresh properties
+  const { fresh, stale } = await db.getFreshProperties(pids);
+
+  if (LOG_LEVEL > 1) {
+    console.log(`WikiColumn: Property cache hit: ${fresh.size}/${pids.length}, fetching ${stale.length} stale`);
+  }
+
+  // If all properties are fresh, return from cache
+  if (stale.length === 0) {
+    return fresh;
+  }
+
+  // Fetch stale properties from API
+  const fetched = await getPropertyInfo(stale, lang);
+
+  // Save fetched properties to cache
+  if (fetched.size > 0) {
+    await db.saveProperties([...fetched.values()]);
+  }
+
+  // Merge fresh cached properties with newly fetched
+  for (const [pid, prop] of fetched) {
+    fresh.set(pid, prop);
+  }
+
+  return fresh;
+}
+
+/**
+ * Query entities by label with caching - checks cache first, fetches only stale labels
+ */
+export async function getCachedEntitiesByLabel(
+  labels: string[],
+  lang: string = PRIMARY_LANGUAGE
+): Promise<Map<string, Map<string, LabelMatch>>> {
+  if (labels.length === 0) return new Map();
+
+  // Normalize labels (same preprocessing as queryEntitiesByLabel)
+  const normalizedLabels = labels.map(label =>
+    label.replace(/^\d+\.\s*/, '').replace(/‡$/, '').trim()
+  );
+
+  // Check cache for fresh label results
+  const { fresh: freshCache, stale } = await db.getFreshLabelCaches(normalizedLabels);
+
+  if (LOG_LEVEL > 1) {
+    console.log(`WikiColumn: Label cache hit: ${freshCache.size}/${normalizedLabels.length}, fetching ${stale.length} stale`);
+  }
+
+  // Convert cached entries to result format
+  const results = new Map<string, Map<string, LabelMatch>>();
+  for (const [label, entry] of freshCache) {
+    const qidMap = new Map<string, LabelMatch>();
+    for (const [qid, data] of Object.entries(entry.results)) {
+      qidMap.set(qid, {
+        itemLabel: data.itemLabel,
+        instanceOf: data.instanceOf,
+      });
+    }
+    results.set(label, qidMap);
+  }
+
+  // If all labels are fresh, return from cache
+  if (stale.length === 0) {
+    return results;
+  }
+
+  // Fetch stale labels from SPARQL
+  const fetched = await queryEntitiesByLabel(stale, lang);
+
+  // Convert fetched results to cache entries and save
+  const cacheEntries: LabelCacheEntry[] = [];
+  for (const [label, qidMap] of fetched) {
+    const resultsRecord: Record<string, { itemLabel: string; instanceOf: string[] }> = {};
+    for (const [qid, data] of qidMap) {
+      resultsRecord[qid] = {
+        itemLabel: data.itemLabel,
+        instanceOf: data.instanceOf,
+      };
+    }
+    cacheEntries.push({
+      label,
+      results: resultsRecord,
+      cachedAt: Date.now(),
+    });
+  }
+
+  // Also cache labels that returned no results (to avoid re-querying)
+  for (const label of stale) {
+    if (!fetched.has(label)) {
+      cacheEntries.push({
+        label,
+        results: {},
+        cachedAt: Date.now(),
+      });
+    }
+  }
+
+  if (cacheEntries.length > 0) {
+    await db.saveLabelCacheEntries(cacheEntries);
+  }
+
+  // Merge cached results with newly fetched
+  for (const [label, qidMap] of fetched) {
+    results.set(label, qidMap);
   }
 
   return results;

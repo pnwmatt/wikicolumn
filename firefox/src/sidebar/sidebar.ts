@@ -11,24 +11,29 @@ import {
   type SidebarColumn,
   type Claim,
   type InjectColumnsPayload,
+  type EligibleTableInfo,
 } from '../lib/types';
 import { db } from '../lib/database';
 import { generateId } from '../lib/utils';
 import {
-  queryEntitiesByLabel,
-  getEntityData,
+  getCachedEntitiesByLabel,
+  getCachedEntityData,
   parseClaims,
-  getPropertyInfo,
+  getCachedPropertyInfo,
   getClaimDisplayValues,
 } from '../lib/wikidata';
 
 const LOG_LEVEL = 5;
 
 // DOM Elements
+const tablePicker = document.getElementById('tablePicker')!;
+const tablePickerStatus = document.getElementById('tablePickerStatus')!;
+const tablePickerList = document.getElementById('tablePickerList')!;
 const emptyState = document.getElementById('emptyState')!;
 const loadingState = document.getElementById('loadingState')!;
 const loadingMessage = document.getElementById('loadingMessage')!;
 const tableEditor = document.getElementById('tableEditor')!;
+const backToPickerBtn = document.getElementById('backToPickerBtn')!;
 const tableTitle = document.getElementById('tableTitle')!;
 const tableStats = document.getElementById('tableStats')!;
 const columnsList = document.getElementById('columnsList')!;
@@ -71,7 +76,8 @@ function indexToLetter(index: number): string {
 }
 
 // Helper: Show specific UI state
-function showState(state: 'empty' | 'loading' | 'editor'): void {
+function showState(state: 'picker' | 'empty' | 'loading' | 'editor'): void {
+  tablePicker.style.display = state === 'picker' ? 'flex' : 'none';
   emptyState.style.display = state === 'empty' ? 'flex' : 'none';
   loadingState.style.display = state === 'loading' ? 'flex' : 'none';
   tableEditor.style.display = state === 'editor' ? 'flex' : 'none';
@@ -195,8 +201,13 @@ function renderPropertyList(searchQuery: string = ''): void {
     );
   });
 
-  // Sort by usage percentage (descending)
-  filteredProperties.sort((a, b) => b.percentage - a.percentage);
+  // Sort by: 1) global usage (descending), 2) percentage (descending)
+  filteredProperties.sort((a, b) => {
+    if (b.globalUsage !== a.globalUsage) {
+      return b.globalUsage - a.globalUsage;
+    }
+    return b.percentage - a.percentage;
+  });
 
   propertyList.innerHTML = '';
 
@@ -381,6 +392,115 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+// ============================================================================
+// Table Picker
+// ============================================================================
+
+// Store eligible tables for the current page
+let eligibleTables: EligibleTableInfo[] = [];
+
+// Request eligible tables from the content script
+async function requestEligibleTables(): Promise<void> {
+  try {
+    tablePickerStatus.textContent = 'Scanning page for tables...';
+    tablePickerList.innerHTML = '';
+
+    const response = await browser.tabs.sendMessage(currentTabId, {
+      type: 'GET_ELIGIBLE_TABLES',
+    }) as { tables: EligibleTableInfo[]; url: string };
+
+    if (response && response.tables) {
+      eligibleTables = response.tables;
+      currentUrl = response.url;
+      renderTablePicker();
+    } else {
+      showState('empty');
+    }
+  } catch (error) {
+    console.error('WikiColumn: Error requesting eligible tables:', error);
+    tablePickerStatus.textContent = 'Error scanning page. Try refreshing.';
+  }
+}
+
+// Render the table picker list
+function renderTablePicker(): void {
+  tablePickerList.innerHTML = '';
+
+  if (eligibleTables.length === 0) {
+    showState('empty');
+    return;
+  }
+
+  tablePickerStatus.textContent = `Found ${eligibleTables.length} table${eligibleTables.length > 1 ? 's' : ''}`;
+
+  for (const table of eligibleTables) {
+    const item = document.createElement('div');
+    item.className = 'table-picker-item';
+    item.dataset.xpath = table.xpath;
+
+    const badgeHtml = table.hasWikipediaLinks
+      ? '<span class="table-picker-item-badge">🔗 Wikipedia</span>'
+      : '';
+
+    item.innerHTML = `
+      <div class="table-picker-item-title">${escapeHtml(table.title)}${badgeHtml}</div>
+      <div class="table-picker-item-info">${table.rowCount} rows, ${table.columnCount} columns</div>
+    `;
+
+    item.addEventListener('click', () => selectTable(table.xpath));
+    tablePickerList.appendChild(item);
+  }
+
+  showState('picker');
+}
+
+// Select a table from the picker and load it
+async function selectTable(xpath: string): Promise<void> {
+  showState('loading');
+  setLoadingMessage('Extracting table data...');
+
+  try {
+    const response = await browser.tabs.sendMessage(currentTabId, {
+      type: 'EXTRACT_TABLE',
+      payload: { xpath },
+    }) as { tableData?: TableData; url?: string; error?: string };
+
+    if (response && response.tableData) {
+      await loadTable({
+        tableData: response.tableData,
+        url: response.url || currentUrl,
+        tabId: currentTabId,
+      });
+      // Scroll to the table on the page
+      await browser.tabs.sendMessage(currentTabId, {
+        type: 'SCROLL_TO_TABLE',
+        payload: { xpath },
+      });
+    } else {
+      console.error('WikiColumn: Failed to extract table:', response?.error);
+      showState('picker');
+    }
+  } catch (error) {
+    console.error('WikiColumn: Error selecting table:', error);
+    showState('picker');
+  }
+}
+
+// Go back to the table picker
+function goBackToPicker(): void {
+  currentTableData = null;
+  currentTableRecord = null;
+  rowMatches = [];
+  availableProperties = [];
+  columns = [];
+  storedLabelToQidMap = null;
+  storedRowToLabel.clear();
+  selectedInstanceTypes.clear();
+
+  showState('picker');
+  requestEligibleTables();
+}
+
 // Main function: Load table and start Wikidata matching
 async function loadTable(payload: EditTablePayload): Promise<void> {
   showState('loading');
@@ -462,9 +582,9 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
     }
   });
 
-  // Get QIDs from labels using SPARQL
+  // Get QIDs from labels using SPARQL (with caching)
   setLoadingMessage('Searching Wikidata by label...');
-  const labelToQidMap = await queryEntitiesByLabel(labels, PRIMARY_LANGUAGE);
+  const labelToQidMap = await getCachedEntitiesByLabel(labels, PRIMARY_LANGUAGE);
 
   // Determine the primary instanceOf by creating a dictionary of instanceOf scores.
   // The score is calculated by determining the COUNT of how many instancesOf per QID and incrementing
@@ -541,15 +661,14 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   const matchedCount = rowMatches.filter((m) => m.qid).length;
   updateMatchingProgress(matchedCount, rowMatches.length);
 
-  // Fetch entity data for matched QIDs
+  // Fetch entity data for matched QIDs (with caching)
   const qids = rowMatches.filter((m) => m.qid).map((m) => m.qid!);
   if (qids.length > 0) {
     setLoadingMessage('Fetching entity data...');
-    const entityData = await getEntityData(qids, PRIMARY_LANGUAGE);
+    const entityData = await getCachedEntityData(qids, PRIMARY_LANGUAGE);
 
-    // Save items to database
+    // Items are already saved to cache by getCachedEntityData
     const items = Array.from(entityData.values());
-    await db.saveItems(items);
 
     // Parse and save claims
     setLoadingMessage('Processing claims...');
@@ -564,13 +683,9 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
 
     await db.saveClaims(allClaims);
 
-    // Fetch property info
+    // Fetch property info (with caching) - this also saves to cache
     setLoadingMessage('Fetching property labels...');
-    const propertyInfo = await getPropertyInfo(Array.from(allPropertyIds), PRIMARY_LANGUAGE);
-
-    // Save properties
-    const properties = Array.from(propertyInfo.values());
-    await db.saveProperties(properties);
+    await getCachedPropertyInfo(Array.from(allPropertyIds), PRIMARY_LANGUAGE);
 
     // Calculate property usage statistics
     await calculatePropertyStats(qids);
@@ -666,12 +781,18 @@ async function calculatePropertyStats(qids: string[]): Promise<void> {
         count,
         percentage: Math.round((count / totalRows) * 100),
         visible: property.visible,
+        globalUsage: property.usage || 0,
       });
     }
   }
 
-  // Sort by percentage
-  availableProperties.sort((a, b) => b.percentage - a.percentage);
+  // Sort by: 1) global usage (descending), 2) percentage (descending)
+  availableProperties.sort((a, b) => {
+    if (b.globalUsage !== a.globalUsage) {
+      return b.globalUsage - a.globalUsage;
+    }
+    return b.percentage - a.percentage;
+  });
 }
 
 // Add a Wikidata column to the table
@@ -730,6 +851,9 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
   currentTableRecord.addedColumns.push(newColumn);
   currentTableRecord.updatedAt = new Date().toISOString();
   await db.saveTable(currentTableRecord);
+
+  // Increment global property usage count
+  await db.incrementPropertyUsage(propertyId);
 
   // Add to columns display
   columns.push({
@@ -808,9 +932,27 @@ function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Scroll to the table on the page
+async function scrollToTable(): Promise<void> {
+  if (!currentTableRecord) return;
+
+  try {
+    await browser.tabs.sendMessage(currentTabId, {
+      type: 'SCROLL_TO_TABLE',
+      payload: { xpath: currentTableRecord.xpath },
+    });
+  } catch (error) {
+    console.error('WikiColumn: Error scrolling to table:', error);
+  }
+}
+
 // Event listeners
 addColumnBtn.addEventListener('click', openPropertyModal);
 closeModalBtn.addEventListener('click', closePropertyModal);
+backToPickerBtn.addEventListener('click', goBackToPicker);
+tableTitle.addEventListener('click', scrollToTable);
+tableTitle.style.cursor = 'pointer';
+tableTitle.title = 'Click to scroll to table';
 
 propertySearch.addEventListener('input', () => {
   renderPropertyList(propertySearch.value);
@@ -876,14 +1018,19 @@ browser.runtime.onMessage.addListener((message: Message) => {
 });
 
 // Track active tab changes
-browser.tabs.onActivated.addListener((activeInfo) => {
+browser.tabs.onActivated.addListener(async (activeInfo) => {
   currentTabId = activeInfo.tabId;
   if (LOG_LEVEL > 1) console.log('WikiColumn: Active tab changed to', currentTabId);
+
+  // If we're on the table picker, refresh the table list
+  if (tablePicker.style.display !== 'none') {
+    await requestEligibleTables();
+  }
 });
 
 // Initialize
 async function init(): Promise<void> {
-  showState('empty');
+  showState('picker');
   await db.init();
 
   // Get the current active tab
@@ -893,6 +1040,11 @@ async function init(): Promise<void> {
   }
 
   console.log('WikiColumn sidebar initialized, active tab:', currentTabId);
+
+  // Request eligible tables from the current page
+  if (currentTabId) {
+    await requestEligibleTables();
+  }
 }
 
 init();

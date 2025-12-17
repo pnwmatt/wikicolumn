@@ -37,6 +37,7 @@ export interface WikidataItem {
   label: string;
   description?: string;
   json: WikidataEntity;
+  cachedAt?: number; // Timestamp for TTL checking
 }
 
 export interface WikidataProperty {
@@ -45,12 +46,21 @@ export interface WikidataProperty {
   description: string;
   usage: number;
   visible: boolean;
+  cachedAt?: number; // Timestamp for TTL checking
 }
 
 export interface Claim {
   qid: string;
   pid: string;
   values: ClaimValue[];
+  cachedAt?: number; // Timestamp for TTL checking
+}
+
+// Cache entry for SPARQL label queries
+export interface LabelCacheEntry {
+  label: string; // The search label (key)
+  results: Record<string, { itemLabel: string; instanceOf: string[] }>; // QID -> data
+  cachedAt: number;
 }
 
 export interface ClaimValue {
@@ -150,6 +160,7 @@ export interface PropertyStats {
   count: number;
   percentage: number;
   visible: boolean;
+  globalUsage: number; // How many times this column has been added globally
 }
 
 // ============================================================================
@@ -167,7 +178,10 @@ export type MessageType =
   | 'UPDATE_INSTANCE_OF'
   | 'CONTEXT_MENU_ACTIVATED'
   | 'HIGHLIGHT_NOT_FOUND_ON'
-  | 'HIGHLIGHT_NOT_FOUND_OFF';
+  | 'HIGHLIGHT_NOT_FOUND_OFF'
+  | 'GET_ELIGIBLE_TABLES'
+  | 'ELIGIBLE_TABLES_RESPONSE'
+  | 'SCROLL_TO_TABLE';
 
 export interface EditTablePayload {
   tableData: TableData;
@@ -227,6 +241,23 @@ export interface HighlightNotFoundPayload {
   keyColumnIndex: number;
 }
 
+export interface EligibleTableInfo {
+  xpath: string;
+  title: string;
+  rowCount: number;
+  columnCount: number;
+  hasWikipediaLinks: boolean;
+}
+
+export interface EligibleTablesResponsePayload {
+  tables: EligibleTableInfo[];
+  url: string;
+}
+
+export interface ScrollToTablePayload {
+  xpath: string;
+}
+
 export type Message =
   | { type: 'EDIT_TABLE'; payload: EditTablePayload }
   | { type: 'ADD_COLUMN'; payload: AddColumnPayload }
@@ -238,7 +269,10 @@ export type Message =
   | { type: 'CONTEXT_MENU_ACTIVATED'; payload: ContextMenuActivatedPayload }
   | { type: 'HIGHLIGHT_NOT_FOUND_ON'; payload: HighlightNotFoundPayload }
   | { type: 'HIGHLIGHT_NOT_FOUND_OFF'; payload: { xpath: string } }
-  | { type: 'OPEN_SIDEBAR' };
+  | { type: 'OPEN_SIDEBAR' }
+  | { type: 'GET_ELIGIBLE_TABLES' }
+  | { type: 'ELIGIBLE_TABLES_RESPONSE'; payload: EligibleTablesResponsePayload }
+  | { type: 'SCROLL_TO_TABLE'; payload: ScrollToTablePayload };
 
 // ============================================================================
 // UI State Types

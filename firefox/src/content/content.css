@@ -12,6 +12,7 @@ th.wikicolumn-added-column {
 .wikicolumn-key-indicator {
   opacity: 0.7;
   font-size: 0.9em;
+  content: ' 🔑';
 }
 
 /* WikiColumn hamburger menu wrapper - fixed width to prevent layout shift */

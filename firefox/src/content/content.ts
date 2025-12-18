@@ -59,6 +59,7 @@ import type {
   UpdateInstanceOfPayload,
   Claim,
   EligibleTableInfo,
+  AddedColumn,
 } from '../lib/types';
 import { getXPath, getNodeFromXPath } from '../lib/utils';
 import { db } from '../lib/database';
@@ -324,11 +325,11 @@ function findKeyColumn(table: HTMLTableElement): number {
   const headerRow = getHeaderRow(table);
   if (!headerRow) return -1;
 
-  const numCols = headerRow.querySelectorAll('td').length;
+  const numCols = headerRow.querySelectorAll('th, td').length;
 
   for (let colIndex = 0; colIndex < numCols; colIndex++) {
     // if the column is center aligned, skip it (likely not a key column)
-    const headerCells = headerRow.querySelectorAll('td');
+    const headerCells = headerRow.querySelectorAll('th, td');
     const headerCell = headerCells[colIndex] as HTMLTableCellElement | undefined;
     if (headerCell) {
       const textAlign = window.getComputedStyle(headerCell).textAlign;
@@ -365,17 +366,13 @@ function addKeyIndicator(table: HTMLTableElement, colIndex: number): void {
   const headerRow = getHeaderRow(table);
   if (!headerRow) return;
 
-  const headerCells = headerRow.querySelectorAll('td');
+  const headerCells = headerRow.querySelectorAll('th, td');
   const headerCell = headerCells[colIndex] as HTMLTableCellElement | undefined;
 
   console.log("WikiColumn: addKeyIndicator: adding key indicator to column", colIndex);
 
-  if (headerCell && !headerCell.querySelector('.wikicolumn-key-indicator')) {
-    const keySpan = document.createElement('span');
-    keySpan.className = 'wikicolumn-key-indicator';
-    keySpan.textContent = ' 🔑';
-    keySpan.title = 'WikiColumn key column (has Wikipedia links)';
-    headerCell.appendChild(keySpan);
+  if (headerCell && !headerCell.classList.contains('wikicolumn-key-indicator')) {
+    headerCell.classList.add('wikicolumn-key-indicator');
   }
 }
 
@@ -455,7 +452,7 @@ function extractTableData(table: HTMLTableElement): TableData {
   const dataRows = getDataRows(table);
   dataRows.forEach((row) => {
     const rowData: CellData[] = [];
-    const cells = row.querySelectorAll('td');
+    const cells = row.querySelectorAll('td, th');  // Include th for row headers
     cells.forEach((cell) => {
       rowData.push(extractCellData(cell as HTMLTableCellElement));
     });
@@ -596,6 +593,7 @@ function scanTables(): void {
  * @param values - Array of values for each data row
  * @param propertyId - Wikidata property ID (e.g., 'P31')
  * @param afterColumnIndex - Insert after this column (0-based index)
+ * @param position - Unique identifier for this column (from AddedColumn.position)
  *
  * @sideEffects
  * - Adds new <th> to header row with 'wikicolumn-added-column' class
@@ -603,7 +601,8 @@ function scanTables(): void {
  * - Updates injectedColumnsByTable map for cleanup tracking
  *
  * @remarks
- * Cells are marked with data-wikicolumn-property attribute for later removal.
+ * Cells are marked with data-wikicolumn-property and data-wikicolumn-position attributes.
+ * The position attribute is used for unique identification when removing columns.
  *
  * @calls getHeaderRow, getDataRows, getXPath
  */
@@ -612,10 +611,11 @@ function injectColumn(
   headerHtml: string,
   values: string[],
   propertyId: string,
-  afterColumnIndex: number
+  afterColumnIndex: number,
+  position: number
 ): void {
   const xpath = getXPath(table);
-  console.log("WikiColumn: injectColumn: injecting column", propertyId, "after column", afterColumnIndex, "into table", xpath);
+  console.log("WikiColumn: injectColumn: injecting column", propertyId, "position", position, "after column", afterColumnIndex, "into table", xpath);
 
   const existing = injectedColumnsByTable.get(xpath) || [];
   existing.push(propertyId);
@@ -626,6 +626,7 @@ function injectColumn(
     const th = document.createElement('th');
     th.innerHTML = headerHtml;
     th.setAttribute('data-wikicolumn-property', propertyId);
+    th.setAttribute('data-wikicolumn-position', position.toString());
     th.classList.add('wikicolumn-added-column');
 
     // Insert after the specified column (afterColumnIndex + 1 is the reference node)
@@ -643,6 +644,7 @@ function injectColumn(
     const td = document.createElement('td');
     td.textContent = values[index] || '';
     td.setAttribute('data-wikicolumn-property', propertyId);
+    td.setAttribute('data-wikicolumn-position', position.toString());
     td.classList.add('wikicolumn-added-column');
 
     // Insert after the specified column
@@ -657,25 +659,26 @@ function injectColumn(
 }
 
 /**
- * Removes a previously injected column from a table.
+ * Removes a previously injected column from a table by position.
  *
  * @param table - The table element
- * @param propertyId - The Wikidata property ID of the column to remove
+ * @param position - The unique position identifier of the column to remove
  *
  * @sideEffects
- * - Removes all cells with matching data-wikicolumn-property attribute
+ * - Removes all cells with matching data-wikicolumn-position attribute
  * - Updates injectedColumnsByTable map
  *
  * @calls getXPath
  */
-function removeColumn(table: HTMLTableElement, propertyId: string): void {
-  const cells = table.querySelectorAll(`[data-wikicolumn-property="${propertyId}"]`);
+function removeColumn(table: HTMLTableElement, position: number): void {
+  const cells = table.querySelectorAll(`[data-wikicolumn-position="${position}"]`);
   cells.forEach((cell) => cell.remove());
 
   const xpath = getXPath(table);
+  // Note: injectedColumnsByTable tracks propertyIds, not positions
+  // This is still useful for cleanup but won't be precise for duplicate properties
   const existing = injectedColumnsByTable.get(xpath) || [];
-  const filtered = existing.filter((id) => id !== propertyId);
-  injectedColumnsByTable.set(xpath, filtered);
+  injectedColumnsByTable.set(xpath, existing);
 }
 
 /**
@@ -743,7 +746,7 @@ function highlightUnmatchedCells(table: HTMLTableElement, labels: string[], keyC
   console.log("WikiColumn: highlightUnmatchedCells: highlighting unmatched cells in column", keyColumnIndex, "with labels:", labels);
 
   dataRows.forEach((row) => {
-    const cells = row.querySelectorAll('td');
+    const cells = row.querySelectorAll('td, th');
     const keyCell = cells[keyColumnIndex] as HTMLTableCellElement | undefined;
 
     if (!keyCell) return;
@@ -940,7 +943,7 @@ async function reinjectSavedColumns(): Promise<void> {
           : addedColumn.label;
 
         // Inject the column
-        injectColumn(tableElement, headerHtml, values, addedColumn.propertyId, tableRecord.keyColumnIndex);
+        injectColumn(tableElement, headerHtml, values, addedColumn.propertyId, tableRecord.keyColumnIndex, addedColumn.position);
       }
 
       console.log('WikiColumn: Successfully restored', tableRecord.addedColumns.length, 'columns for table:', tableRecord.id);
@@ -979,11 +982,27 @@ function escapeRegExp(string: string): string {
  * - Must have at least 1 data row
  * - Must be visible (not display:none or visibility:hidden)
  *
+ * Also checks IndexedDB for saved table configurations and includes
+ * savedColumns for tables that have been previously configured.
+ *
  * @calls getHeaderRow, getDataRows, findKeyColumn, findNearestHeading, getXPath
  */
-function getEligibleTables(): EligibleTableInfo[] {
+async function getEligibleTables(): Promise<EligibleTableInfo[]> {
   const tables = document.querySelectorAll('table');
   const eligible: EligibleTableInfo[] = [];
+
+  // Get saved tables for this URL from IndexedDB
+  await db.init();
+  const url = window.location.href;
+  const savedTables = await db.getTablesByUrl(url);
+
+  // Build a map of xpath -> saved columns for quick lookup
+  const savedColumnsByXpath = new Map<string, AddedColumn[]>();
+  for (const tableRecord of savedTables) {
+    if (tableRecord.addedColumns.length > 0) {
+      savedColumnsByXpath.set(tableRecord.xpath, tableRecord.addedColumns);
+    }
+  }
 
   tables.forEach((table) => {
     const tableEl = table as HTMLTableElement;
@@ -1026,12 +1045,30 @@ function getEligibleTables(): EligibleTableInfo[] {
       title = findNearestHeading(tableEl) || 'Untitled Table';
     }
 
+    // Find WikiColumn-added columns by checking header cells for the class
+    const wikicolumnColumnIndexes: number[] = [];
+    if (headerRow) {
+      const headerCells = headerRow.querySelectorAll('th, td');
+      headerCells.forEach((cell, index) => {
+        if (cell.classList.contains('wikicolumn-added-column')) {
+          wikicolumnColumnIndexes.push(index);
+        }
+      });
+    }
+
+    const xpath = getXPath(tableEl);
+
+    // Check if this table has saved columns in IndexedDB
+    const savedColumns = savedColumnsByXpath.get(xpath);
+
     eligible.push({
-      xpath: getXPath(tableEl),
+      xpath,
       title,
       rowCount: dataRows.length,
       columnCount,
       hasWikipediaLinks,
+      wikicolumnColumnIndexes,
+      savedColumns,
     });
   });
 
@@ -1085,7 +1122,7 @@ browser.runtime.onMessage.addListener(
         const table = getNodeFromXPath(payload.xpath, document) as HTMLTableElement;
         if (table && table.tagName === 'TABLE') {
           for (const column of payload.columns) {
-            injectColumn(table, column.headerHtml, column.values, column.propertyId, payload.afterColumnIndex);
+            injectColumn(table, column.headerHtml, column.values, column.propertyId, payload.afterColumnIndex, column.position);
           }
           sendResponse({ success: true });
         } else {
@@ -1099,7 +1136,7 @@ browser.runtime.onMessage.addListener(
         const removePayload = message.payload as RemoveColumnPayload;
         const removeTable = getNodeFromXPath(removePayload.xpath, document) as HTMLTableElement;
         if (removeTable && removeTable.tagName === 'TABLE') {
-          removeColumn(removeTable, removePayload.propertyId);
+          removeColumn(removeTable, removePayload.position);
           sendResponse({ success: true });
         } else {
           sendResponse({ error: 'Table not found' });
@@ -1143,12 +1180,12 @@ browser.runtime.onMessage.addListener(
       }
 
       case 'GET_ELIGIBLE_TABLES': {
-        const eligibleTables = getEligibleTables();
+        const eligibleTables = await getEligibleTables();
         console.log('WikiColumn: Found', eligibleTables.length, 'eligible tables');
-        return Promise.resolve({
+        return {
           tables: eligibleTables,
           url: window.location.href,
-        });
+        };
       }
 
       case 'EXTRACT_TABLE': {
@@ -1199,12 +1236,12 @@ browser.runtime.onMessage.addListener(
  *
  * @calls scanTables, reinjectSavedColumns, processTable
  */
-function init(): void {
+async function init(): Promise<void> {
   // Scan existing tables
   scanTables();
 
-  // Re-inject saved columns
-  reinjectSavedColumns();
+  // Re-inject saved columns (await to ensure columns are restored before messages are processed)
+  await reinjectSavedColumns();
 
   // Watch for dynamically added tables
   const observer = new MutationObserver((mutations) => {
@@ -1228,7 +1265,7 @@ function init(): void {
 
 // Run initialization when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', () => init());
 } else {
   init();
 }

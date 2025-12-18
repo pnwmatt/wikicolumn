@@ -46,14 +46,14 @@ export interface WikidataProperty {
   description: string;
   usage: number;
   visible: boolean;
-  cachedAt?: number; // Timestamp for TTL checking
+  cachedAt: number; // Timestamp for TTL checking
 }
 
 export interface Claim {
   qid: string;
   pid: string;
   values: ClaimValue[];
-  cachedAt?: number; // Timestamp for TTL checking
+  cachedAt: number; // Timestamp for TTL checking
 }
 
 // Cache entry for SPARQL label queries
@@ -200,6 +200,7 @@ export interface AddColumnPayload {
 export interface RemoveColumnPayload {
   tableId: string;
   propertyId: string;
+  position: number; // Unique ID for the column (from AddedColumn.position)
   xpath: string;
 }
 
@@ -217,6 +218,7 @@ export interface InjectColumnsPayload {
     label: string;
     headerHtml: string;
     values: string[];
+    position: number; // Unique ID for the column (from AddedColumn.position)
   }[];
 }
 
@@ -247,6 +249,8 @@ export interface EligibleTableInfo {
   rowCount: number;
   columnCount: number;
   hasWikipediaLinks: boolean;
+  wikicolumnColumnIndexes: number[]; // Header cell indexes of WikiColumn-added columns
+  savedColumns?: AddedColumn[]; // Columns saved in IndexedDB for this table
 }
 
 export interface EligibleTablesResponsePayload {
@@ -294,4 +298,5 @@ export interface SidebarColumn {
   isKey: boolean;
   isWikidata: boolean;
   propertyId?: string;
+  position?: number; // Unique identifier for Wikidata columns
 }

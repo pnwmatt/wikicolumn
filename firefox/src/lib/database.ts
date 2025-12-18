@@ -8,6 +8,8 @@ import type {
   LabelCacheEntry,
 } from './types';
 
+const LOG_LEVEL = 0;
+
 const DB_NAME = 'WikiColumnDB';
 const DB_VERSION = 2;
 
@@ -273,7 +275,6 @@ class WikiColumnDB {
   }
 
   async saveProperties(properties: WikidataProperty[]): Promise<void> {
-    const LOG_LEVEL = 5;
     const db = await this.init();
     const transaction = db.transaction(STORES.PROPERTIES, 'readwrite');
     const store = transaction.objectStore(STORES.PROPERTIES);

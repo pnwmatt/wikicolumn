@@ -127,7 +127,7 @@ function renderColumns(): void {
       ${col.isKey ? '<span class="column-key-icon" title="Key column for Wikidata matching"></span>' : ''}
       ${col.isWikidata ? `
         <div class="column-actions">
-          <button class="column-action-btn delete" title="Remove column" data-property="${col.propertyId}">🗑️</button>
+          <button class="column-action-btn delete" title="Remove column" data-position="${col.position}">🗑️</button>
         </div>
       ` : ''}
     `;
@@ -137,14 +137,15 @@ function renderColumns(): void {
     if (deleteBtn) {
       deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const propertyId = (e.target as HTMLElement).dataset.property;
-        if (propertyId) {
-          removeWikidataColumn(propertyId);
+        const positionStr = (e.target as HTMLElement).dataset.position;
+        if (positionStr !== undefined) {
+          removeWikidataColumn(parseInt(positionStr, 10));
         }
       });
     }
 
     // Handle click on non-Wikidata columns to switch key column
+    // col.index is 0 indexed.
     if (!col.isWikidata && !col.isKey) {
       item.style.cursor = 'pointer';
       item.title = 'Click to set as key column';
@@ -512,23 +513,19 @@ async function loadTable(payload: EditTablePayload): Promise<void> {
   currentTableData = payload.tableData;
   currentUrl = payload.url;
 
-  // Detect key column
-  const keyColumnIndex = detectKeyColumn(currentTableData);
-
-  // Build columns array
-  columns = currentTableData.headers.map((header, index) => ({
-    letter: indexToLetter(index),
-    index,
-    header: header.text,
-    isKey: index === keyColumnIndex,
-    isWikidata: false,
-  }));
-
-  // Check if table already exists in database
+  // Check if table already exists in database - use saved keyColumnIndex as source of truth
   let tableRecord = await db.getTableByUrlAndXpath(currentUrl, currentTableData.xpath);
 
-  if (LOG_LEVEL > 1) console.log('WikiColumn: Loaded table record from DB:', tableRecord);
-  if (!tableRecord) {
+  let keyColumnIndex: number;
+  if (tableRecord) {
+    // Use saved key column index from database
+    keyColumnIndex = tableRecord.keyColumnIndex;
+    if (LOG_LEVEL > 1) console.log('WikiColumn: Using saved keyColumnIndex from DB:', keyColumnIndex);
+  } else {
+    // Detect key column for new tables
+    keyColumnIndex = detectKeyColumn(currentTableData);
+    if (LOG_LEVEL > 1) console.log('WikiColumn: Detected keyColumnIndex for new table:', keyColumnIndex);
+
     // Create new table record
     tableRecord = {
       id: generateId(),
@@ -550,6 +547,30 @@ async function loadTable(payload: EditTablePayload): Promise<void> {
   }
 
   currentTableRecord = tableRecord;
+
+  // Build columns array using the authoritative keyColumnIndex
+  // Start with original columns only (not any already-injected Wikidata columns)
+  const originalColumnCount = tableRecord.originalColumns.length;
+  columns = currentTableData.headers.slice(0, originalColumnCount).map((header, index) => ({
+    letter: indexToLetter(index),
+    index,
+    header: header.text,
+    isKey: index === keyColumnIndex,
+    isWikidata: false,
+  }));
+
+  // Add saved Wikidata columns to the display
+  for (const addedColumn of tableRecord.addedColumns) {
+    columns.push({
+      letter: indexToLetter(columns.length),
+      index: columns.length,
+      header: addedColumn.label.toLocaleUpperCase(),
+      isKey: false,
+      isWikidata: true,
+      propertyId: addedColumn.propertyId,
+      position: addedColumn.position,
+    });
+  }
 
   // Update UI
   tableTitle.textContent = tableRecord.tableTitle || 'Table';
@@ -839,7 +860,7 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
   const headerHtml = originalHeader
     ? originalHeader.headerHtml.replace(
         new RegExp(escapeRegExp(originalHeader.header), 'g'),
-        label
+      toTitleCase(label)
       )
     : label;
   if (LOG_LEVEL > 2) console.log("WikiColumn: Generated header HTML for new column:", headerHtml, label, originalHeader);
@@ -865,6 +886,7 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
     isKey: false,
     isWikidata: true,
     propertyId,
+    position: newColumn.position,
   });
 
   // Send message to content script to inject column (after key column)
@@ -876,6 +898,7 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
       label,
       headerHtml,
       values,
+      position: newColumn.position,
     }],
   };
   console.log('WikiColumn: Injecting column with payload:', injectPayload, currentTabId);
@@ -892,19 +915,28 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
   showState('editor');
 }
 
-// Remove a Wikidata column
-async function removeWikidataColumn(propertyId: string): Promise<void> {
+// Remove a Wikidata column by its unique position identifier
+async function removeWikidataColumn(position: number): Promise<void> {
   if (!currentTableRecord) return;
+
+  // Find the column to get the propertyId for the payload
+  const columnToRemove = currentTableRecord.addedColumns.find(
+    (col) => col.position === position
+  );
+  if (!columnToRemove) {
+    console.error('WikiColumn: Column not found for position:', position);
+    return;
+  }
 
   // Remove from table record
   currentTableRecord.addedColumns = currentTableRecord.addedColumns.filter(
-    (col) => col.propertyId !== propertyId
+    (col) => col.position !== position
   );
   currentTableRecord.updatedAt = new Date().toISOString();
   await db.saveTable(currentTableRecord);
 
   // Remove from columns display
-  columns = columns.filter((col) => col.propertyId !== propertyId);
+  columns = columns.filter((col) => col.position !== position);
 
   // Reassign letters
   columns.forEach((col, index) => {
@@ -918,7 +950,8 @@ async function removeWikidataColumn(propertyId: string): Promise<void> {
       type: 'REMOVE_COLUMN',
       payload: {
         tableId: currentTableRecord.id,
-        propertyId,
+        propertyId: columnToRemove.propertyId,
+        position,
         xpath: currentTableRecord.xpath,
       },
     });
@@ -946,6 +979,13 @@ async function scrollToTable(): Promise<void> {
   } catch (error) {
     console.error('WikiColumn: Error scrolling to table:', error);
   }
+}
+
+function toTitleCase(str: string): string {
+  return str.replace(
+    /\w\S*/g,
+    (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
+  );
 }
 
 // Event listeners
@@ -1073,3 +1113,4 @@ async function init(): Promise<void> {
 }
 
 init();
+

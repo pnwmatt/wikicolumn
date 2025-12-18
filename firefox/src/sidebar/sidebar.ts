@@ -860,8 +860,7 @@ async function addWikidataColumn(propertyId: string, label: string): Promise<voi
   const headerHtml = originalHeader
     ? originalHeader.headerHtml.replace(
         new RegExp(escapeRegExp(originalHeader.header), 'g'),
-      toTitleCase(label)
-      )
+      toTitleCase(label))
     : label;
   if (LOG_LEVEL > 2) console.log("WikiColumn: Generated header HTML for new column:", headerHtml, label, originalHeader);
 

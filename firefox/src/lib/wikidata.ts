@@ -297,6 +297,7 @@ export async function getCachedLabels(
       db.saveItem({
         qid: id,
         label,
+        cachedAt: Date.now(),
       });
     }
   }

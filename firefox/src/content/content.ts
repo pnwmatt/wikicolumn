@@ -624,7 +624,12 @@ function injectColumn(
   const headerRow = getHeaderRow(table);
   if (headerRow) {
     const th = document.createElement('th');
-    th.innerHTML = headerHtml;
+    // Get the key column header text
+    const headerCells2 = headerRow.querySelectorAll('th, td');
+    const keyColumnHeader = headerCells2[afterColumnIndex] as HTMLTableCellElement | undefined;
+    const keyColumnText = keyColumnHeader?.textContent?.trim() || 'Unknown';
+
+    th.innerHTML = headerHtml + `<div style="font-size: 0.8em; font-weight: normal; color: #666; margin-top: 2px;">Key: ${keyColumnText}</div>`;
     th.setAttribute('data-wikicolumn-property', propertyId);
     th.setAttribute('data-wikicolumn-position', position.toString());
     th.classList.add('wikicolumn-added-column');

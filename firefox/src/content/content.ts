@@ -217,9 +217,13 @@ function extractCellData(cell: HTMLTableCellElement): CellData {
     });
   });
 
+  // Clone cell and strip WikiColumn-added elements to get clean text/html
+  const cleanCell = cell.cloneNode(true) as HTMLTableCellElement;
+  cleanCell.querySelectorAll('.wikicolumn-key-info').forEach((el) => el.remove());
+
   return {
-    text: cell.textContent?.trim() || '',
-    html: cell.innerHTML,
+    text: cleanCell.textContent?.trim() || '',
+    html: cleanCell.innerHTML,
     links,
   };
 }
@@ -630,7 +634,7 @@ function injectColumn(
     const keyColumnHeader = headerCells2[afterColumnIndex] as HTMLTableCellElement | undefined;
     const keyColumnText = keyColumnHeader?.textContent?.trim() || 'Unknown';
 
-    th.innerHTML = headerHtml + `<div style="font-size: 0.8em; font-weight: normal; color: #666; margin-top: 2px;">Key: ${keyColumnText}</div>`;
+    th.innerHTML = headerHtml + `<div class="wikicolumn-key-info" style="font-size: 0.8em; font-weight: normal; color: #666; margin-top: 2px;">Key: ${keyColumnText}</div>`;
     th.setAttribute('data-wikicolumn-property', propertyId);
     th.setAttribute('data-wikicolumn-position', position.toString());
     th.classList.add('wikicolumn-added-column');

@@ -215,7 +215,7 @@ async function getLabels(
       action: 'wbgetentities',
       ids: idsStr,
       props: 'labels',
-      languages: lang,
+      languages: lang + "|mul",
       format: 'json',
       origin: '*',
     });
@@ -227,7 +227,7 @@ async function getLabels(
 
       if (data.entities) {
         for (const [id, entity] of Object.entries(data.entities)) {
-          const label = entity.labels?.[lang]?.value || id;
+          const label = entity.labels?.[lang]?.value || entity.labels?.['mul']?.value || id;
           results.set(id, label);
         }
       }

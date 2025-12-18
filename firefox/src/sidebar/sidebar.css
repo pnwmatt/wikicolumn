@@ -583,3 +583,20 @@ body {
   margin-right: 0.5rem;
   cursor: pointer;
 }
+
+.instance-type-toggle {
+  padding: 0.25rem 0.5rem;
+}
+
+.instance-type-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.instance-type-toggle-btn:hover {
+  text-decoration: underline;
+}

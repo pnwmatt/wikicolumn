@@ -624,6 +624,33 @@ function createImageLink(src: string): HTMLElement {
   return container;
 }
 
+function createLink(src: string): HTMLElement {
+  const container = document.createElement('div');
+  container.className = 'wikicolumn-image-container';
+  container.style.cssText = `
+    position: relative;
+    display: inline-block;
+    width: 150px;
+    min-width: 30px;
+    max-width: 100%;
+  `;
+
+  const link = document.createElement('a');
+  link.href = src;
+  link.style.cssText = `
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
+  `;
+  link.innerText = 'Visit Link (' + src + ')';;
+  link.target = '_blank';
+
+  container.appendChild(link);
+
+  return container;
+}
+
 /**
  * Injects a new column into a table after a specific column index.
  *
@@ -691,6 +718,8 @@ function injectColumn(
     // Check if value is an image URL
     if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value)) {
       td.appendChild(createImageLink(value));
+    } else if (/^http/i.test(value)) {
+      td.appendChild(createLink(value));
     } else {
       td.textContent = value;
     }

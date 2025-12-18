@@ -260,6 +260,8 @@ function renderPropertyList(searchQuery: string = ''): void {
 }
 
 // Render instance types list in the sidebar
+const INSTANCE_TYPES_INITIAL_LIMIT = 5;
+
 function renderInstanceTypes(
   instanceOfScores: Map<string, number>,
   primaryInstanceTypes: string[]
@@ -277,43 +279,71 @@ function renderInstanceTypes(
   const sortedTypes = Array.from(instanceOfScores.entries())
     .sort((a, b) => b[1] - a[1]);
 
-  for (const [type, score] of sortedTypes) {
-    const li = document.createElement('li');
-    li.className = 'instance-type-item';
+  const hasMoreItems = sortedTypes.length > INSTANCE_TYPES_INITIAL_LIMIT;
+  let isExpanded = false;
 
-    const isPrimary = primaryInstanceTypes.includes(type);
-    if (isPrimary) {
-      li.classList.add('primary');
+  function renderItems(showAll: boolean): void {
+    instanceTypesList.innerHTML = '';
+    const itemsToShow = showAll ? sortedTypes : sortedTypes.slice(0, INSTANCE_TYPES_INITIAL_LIMIT);
+
+    for (const [type, score] of itemsToShow) {
+      const li = document.createElement('li');
+      li.className = 'instance-type-item';
+
+      const isPrimary = primaryInstanceTypes.includes(type);
+      if (isPrimary) {
+        li.classList.add('primary');
+      }
+
+      const isChecked = selectedInstanceTypes.has(type);
+
+      li.innerHTML = `
+        <input type="checkbox" class="instance-type-checkbox" data-type="${type}" ${isChecked ? 'checked' : ''}>
+        <span class="instance-type-name">${type}</span>
+        <span class="instance-type-score">${score}%</span>
+      `;
+
+      // Add checkbox change handler
+      const checkbox = li.querySelector('.instance-type-checkbox') as HTMLInputElement;
+      checkbox.addEventListener('change', async () => {
+        if (checkbox.checked) {
+          selectedInstanceTypes.add(type);
+        } else {
+          selectedInstanceTypes.delete(type);
+        }
+        await refilterRowMatches();
+
+        // Persist selected instance types to database
+        if (currentTableRecord) {
+          currentTableRecord.selectedInstanceTypes = Array.from(selectedInstanceTypes);
+          currentTableRecord.updatedAt = new Date().toISOString();
+          await db.saveTable(currentTableRecord);
+        }
+      });
+
+      instanceTypesList.appendChild(li);
     }
 
-    const isChecked = selectedInstanceTypes.has(type);
+    // Add "Show more/less" button if there are more than INSTANCE_TYPES_INITIAL_LIMIT items
+    if (hasMoreItems) {
+      const toggleLi = document.createElement('li');
+      toggleLi.className = 'instance-type-toggle';
+      const remainingCount = sortedTypes.length - INSTANCE_TYPES_INITIAL_LIMIT;
+      toggleLi.innerHTML = showAll
+        ? '<button class="instance-type-toggle-btn">Show less</button>'
+        : `<button class="instance-type-toggle-btn">Show ${remainingCount} more...</button>`;
 
-    li.innerHTML = `
-      <input type="checkbox" class="instance-type-checkbox" data-type="${type}" ${isChecked ? 'checked' : ''}>
-      <span class="instance-type-name">${type}</span>
-      <span class="instance-type-score">${score}%</span>
-    `;
+      const toggleBtn = toggleLi.querySelector('.instance-type-toggle-btn') as HTMLButtonElement;
+      toggleBtn.addEventListener('click', () => {
+        isExpanded = !isExpanded;
+        renderItems(isExpanded);
+      });
 
-    // Add checkbox change handler
-    const checkbox = li.querySelector('.instance-type-checkbox') as HTMLInputElement;
-    checkbox.addEventListener('change', async () => {
-      if (checkbox.checked) {
-        selectedInstanceTypes.add(type);
-      } else {
-        selectedInstanceTypes.delete(type);
-      }
-      await refilterRowMatches();
-
-      // Persist selected instance types to database
-      if (currentTableRecord) {
-        currentTableRecord.selectedInstanceTypes = Array.from(selectedInstanceTypes);
-        currentTableRecord.updatedAt = new Date().toISOString();
-        await db.saveTable(currentTableRecord);
-      }
-    });
-
-    instanceTypesList.appendChild(li);
+      instanceTypesList.appendChild(toggleLi);
+    }
   }
+
+  renderItems(false);
 }
 
 // Re-filter row matches based on selected instance types

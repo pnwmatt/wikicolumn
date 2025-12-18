@@ -1,65 +1,26 @@
-# Webtero
+# WikiColumn
 
 A Firefox extension that lets you add columns from Wikidata to most datatables on Wikipedia. Once activated on a table, you choose which column is "key" (e.g. movie titles, business names), and then select which properties from Wikidata you want to add as new columns to the table. The extension fetches the data from Wikidata and inserts it to the table.
 
-## Use Cases
+## Example Use Cases
 
 - Add genre, run time, and review score to some [award winner tables](https://en.wikipedia.org/wiki/GLAAD_Media_Award_for_Outstanding_Film_%E2%80%93_Wide_Release)
 
-![webtero](https://github.com/user-attachments/assets/02b35134-2ce9-44b2-a441-20a4b997d82c)
+- Add the `opposite` to the table of [zodiac signs](https://en.wikipedia.org/wiki/Chinese_zodiac)
 
-## Features
+- Add a link to the government website or coordinates from a [list of cities](https://en.wikipedia.org/wiki/List_of_cities_and_towns_in_Estonia)
 
-- "Save" button archives the web pages to a specific Zotero Project
-  - Any link you click from a "Saved" page will be auto-saved to your library
-  - Links on the page you're viewing to a page in Zotero will have a webtero badge appended so you can see which links you've stored, how much you've read, and a summary of the annotations on that page
-- Select text to show a popup to pick one of with Zotero's 8 color options to store the annotation
-  - You can attach notes to annotations
-  - You don't have to wait for the save to complete (or start): making an annotation starts (or waits) for the save, and then saves the annotations to the save once it's complete
-- Full-page snapshots use the same technique as the Zotero Connect browser plugins
-- Track reading progress, time spent on pages, and referer (saved locally in your browser)
-- OAuth authentication with Zotero Web API
+- Add the `population` of [countries](https://en.wikipedia.org/wiki/European_Charter_for_Regional_or_Minority_Languages)
 
 ## Privacy Notes
 
-- Does not communicate with any services except Zotero.com - your data is as private as your Zotero collection already is
+- Does not communicate with any services except wikidata.org.
 
 ## Requirements
 
 - Firefox 142.0 or later
-- Zotero.com Web Library
-
-## Limitations
-
-- Currently doesn't support PDFs in the browser, but can later. It's just not a flow I use so I didn't prioritize it.
-- Built specifically for Firefox because:
-  1. Corporations like Google are ruining the internet and paying for the destruction of the East Wing of the White House
-  2. Firefox supports Sidebars, which felt like an intuitive way to support this feature
-
-## FAQ
-
-- Users doing sensitive work may opt to disable automatic extension updates. (I would love feedback on this note.). In Firefox, go to `about:config`, select `extensions.update.enabled` and set it to `false`. You can then manually update the extension by downloading the latest release from the <a href="https://addons.mozilla.org/">Mozilla Add-ons site</a> or from the [GitHub releases page](https://github.com/pnwmatt/webtero/releases).
-- Forward/backward compatible: Annotations made in Zotero on a webpage (in the client or Zotero.com Web Library) will be visible when you surf to that page in Firefox. Annotations made with Webtero are equally visible when viewing in the client or Zotero.com Web Library.
-- Uses your Zotero storage at the moment
-- Does not connect with your local Zotero, instead currently uses the Web API for Zotero (so your library must be synced with Zotero.com). This can be fixed in the future but out-of-the-box Zotero's local APIs don't support this functionality.
-- There is no paywall or paid features beyond your existing way of managing your Zotero storage (although the author is unemployed so [sponsorship](https://github.com/sponsors/pnwmatt) is appreciated!)
-
-## Configurable Settings
-
-In the Webtero Sidebar, the gear icon allows you to:
-
-- Disable Auto-Save
-- Disable Link Indicators that you've saved the destination of a link to your Zotero
-- Disable read progress tracking
 
 # Contributions are Welcome
-
-## Install from Github
-
-1. Download `webtero-0.1.*.zip` from [Releases](https://github.com/pnwmatt/webtero/releases)
-2. Unzip it
-3. Go to Firefox Debug Extensions (Copy/paste this url: `about:debugging#/runtime/this-firefox`) and "Load a Temporary Add-on...". Find the directory where you unzipped webtero and choose the manifest.json to load.
-4. The sidebar should open and you can now authenticate into Webtero securely using OAuth.
 
 ## Building
 
@@ -89,30 +50,3 @@ To lint the extension:
 cd dist
 pnpm web-ext lint
 ```
-
-## Project Structure
-
-```
-src/
-  background/    Background service worker (message routing, API calls)
-  content/       Content script (highlighting, toolbars, page tracking)
-  sidebar/       Sidebar UI (project browser, annotations, page info)
-  options/       Options page (authentication settings)
-  lib/           Shared utilities and types
-    types.ts     TypeScript interfaces (Project, Annotation, SavedPage)
-    utils.ts     Helper functions
-    zotero-api.ts Zotero Web API client
-```
-
-## Authentication
-
-The extension supports two authentication methods:
-
-1. OAuth (recommended) - Authenticate via Zotero's OAuth flow
-2. API Key - Manual entry of Zotero API credentials
-
-Configure authentication in the extension options page.
-
-## License
-
-See LICENSE file.

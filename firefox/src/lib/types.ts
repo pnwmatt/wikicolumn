@@ -181,6 +181,7 @@ export type MessageType =
   | 'HIGHLIGHT_NOT_FOUND_OFF'
   | 'GET_ELIGIBLE_TABLES'
   | 'ELIGIBLE_TABLES_RESPONSE'
+  | 'GET_SAVED_TABLES_FOR_URL'
   | 'EDIT_TABLE';
 
 export interface EditTablePayload {
@@ -262,6 +263,14 @@ export interface ScrollToTablePayload {
   xpath: string;
 }
 
+export interface GetSavedTablesForUrlPayload {
+  url: string;
+}
+
+export interface SavedTablesResponse {
+  tables: TableRecord[];
+}
+
 export type Message =
   | { type: 'EDIT_TABLE'; payload: EditTablePayload }
   | { type: 'ADD_COLUMN'; payload: AddColumnPayload }
@@ -276,7 +285,8 @@ export type Message =
   | { type: 'OPEN_SIDEBAR' }
   | { type: 'GET_ELIGIBLE_TABLES' }
   | { type: 'ELIGIBLE_TABLES_RESPONSE'; payload: EligibleTablesResponsePayload }
-  | { type: 'SCROLL_TO_TABLE'; payload: ScrollToTablePayload };
+  | { type: 'SCROLL_TO_TABLE'; payload: ScrollToTablePayload }
+  | { type: 'GET_SAVED_TABLES_FOR_URL'; payload: GetSavedTablesForUrlPayload };
 
 // ============================================================================
 // UI State Types

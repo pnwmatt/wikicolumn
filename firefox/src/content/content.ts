@@ -60,6 +60,7 @@ import type {
   Claim,
   EligibleTableInfo,
   AddedColumn,
+  TableRecord,
 } from '../lib/types';
 import { getXPath, getNodeFromXPath } from '../lib/utils';
 import { db } from '../lib/database';
@@ -820,7 +821,14 @@ async function reinjectSavedColumns(): Promise<void> {
   try {
     await db.init();
     const url = window.location.href;
-    const savedTables = await db.getTablesByUrl(url);
+
+    // Request saved tables from background script (which has access to extension's IndexedDB)
+    const response = await browser.runtime.sendMessage({
+      type: 'GET_SAVED_TABLES_FOR_URL',
+      payload: { url },
+    }) as { tables: TableRecord[] } | undefined;
+
+    const savedTables = response?.tables || [];
 
     for (const tableRecord of savedTables) {
       if (tableRecord.addedColumns.length === 0) continue;

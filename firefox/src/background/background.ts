@@ -1,6 +1,7 @@
 // WikiColumn - Background Service Worker
 
-import type { Message } from '../lib/types';
+import type { Message, SavedTablesResponse } from '../lib/types';
+import { db } from '../lib/database';
 
 const CONTEXT_MENU_ID = 'wikicolumn-edit-table';
 
@@ -57,6 +58,18 @@ browser.runtime.onMessage.addListener(
         }
         break;
 
+      case 'GET_SAVED_TABLES_FOR_URL': {
+        // Content script requests saved tables from extension's IndexedDB
+        const { url } = message.payload;
+        try {
+          const tables = await db.getTablesByUrl(url);
+          const response: SavedTablesResponse = { tables };
+          return response;
+        } catch (error) {
+          console.error('WikiColumn: Error getting saved tables:', error);
+          return { tables: [] } as SavedTablesResponse;
+        }
+      }
     }
 
     // Return true to indicate async response (even if we don't use it)

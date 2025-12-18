@@ -1,0 +1,131 @@
+name: Build Firefox Extension
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: firefox/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: firefox
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify version consistency
+        working-directory: firefox
+        run: |
+          MANIFEST_VERSION=$(grep '"version":' manifest.json | sed 's/.*"version": "\(.*\)".*/\1/')
+          PACKAGE_VERSION=$(grep '"version":' package.json | sed 's/.*"version": "\(.*\)".*/\1/')
+          echo "Manifest version: $MANIFEST_VERSION"
+          echo "Package version: $PACKAGE_VERSION"
+          if [ "$MANIFEST_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Error: Version mismatch between manifest.json ($MANIFEST_VERSION) and package.json ($PACKAGE_VERSION)"
+            exit 1
+          fi
+          echo "Version check passed: $MANIFEST_VERSION"
+
+          # For PRs targeting main, check if tag already exists
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.base_ref }}" = "main" ]; then
+            cd ..
+            git fetch --tags
+            if git tag | grep -q "^v$MANIFEST_VERSION$"; then
+              echo "Error: Tag v$MANIFEST_VERSION already exists. You must increment the version in manifest.json and package.json."
+              exit 1
+            fi
+            echo "Tag check passed: v$MANIFEST_VERSION does not exist yet"
+          fi
+
+      - name: Install web-ext
+        working-directory: firefox
+        run: pnpm install web-ext
+
+      - name: Build extension
+        working-directory: firefox
+        run: pnpm run build
+
+      - name: Build extension package
+        working-directory: firefox/dist
+        run: pnpm web-ext build --source-dir=dist/ --overwrite-dest
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wikicolumn-firefox-extension
+          path: firefox/web-ext-artifacts/*.zip
+          if-no-files-found: error
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firefox/web-ext-artifacts/*.zip
+
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for tag operations
+
+      - name: Extract version from manifest.json
+        id: extract-version
+        run: |
+          VERSION=$(grep '"version":' firefox/manifest.json | sed 's/.*"version": "\(.*\)".*/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Check if tag exists
+        id: tag-check
+        run: |
+          VERSION=${{ steps.extract-version.outputs.version }}
+          if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION$"; then
+            echo "Tag v$VERSION already exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag v$VERSION does not exist, will create"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download artifact
+        if: steps.tag-check.outputs.exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: wikicolumn-firefox-extension
+          path: firefox
+
+      - name: Create tag and GitHub Release
+        if: steps.tag-check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=v${{ steps.extract-version.outputs.version }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a $TAG -m "Release $TAG"
+          git push origin $TAG
+          gh release create $TAG --generate-notes firefox/*.zip

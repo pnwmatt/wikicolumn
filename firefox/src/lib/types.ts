@@ -15,6 +15,7 @@ export interface TableRecord {
   originalColumns: ColumnInfo[];
   addedColumns: AddedColumn[];
   keyColumnIndex: number;
+  selectedInstanceTypes?: string[]; // Persisted entity type filter selections
   createdAt: string;
   updatedAt: string;
 }

@@ -137,6 +137,11 @@ body {
   font-weight: 500;
 }
 
+.table-picker-item-badge-saved {
+  background-color: #e6f4ea;
+  color: #1e7e34;
+}
+
 /* Back button */
 .back-btn {
   background: none;

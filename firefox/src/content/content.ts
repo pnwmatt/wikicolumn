@@ -591,6 +591,40 @@ function scanTables(): void {
 // ============================================================================
 
 /**
+ * Creates a resizable image element for displaying image URLs in table cells.
+ * The image maintains aspect ratio and can be resized by dragging a handle.
+ *
+ * @param src - The image URL
+ * @returns A container element with the resizable image
+ */
+function createImageLink(src: string): HTMLElement {
+  const container = document.createElement('div');
+  container.className = 'wikicolumn-image-container';
+  container.style.cssText = `
+    position: relative;
+    display: inline-block;
+    width: 150px;
+    min-width: 30px;
+    max-width: 100%;
+  `;
+
+  const link = document.createElement('a');
+  link.href = "https://commons.wikimedia.org/wiki/File:" + src;
+  link.style.cssText = `
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
+  `;
+  link.innerText = 'View Image';
+  link.target = '_blank';
+
+  container.appendChild(link);
+
+  return container;
+}
+
+/**
  * Injects a new column into a table after a specific column index.
  *
  * @param table - The table element
@@ -652,7 +686,15 @@ function injectColumn(
   const dataRows = getDataRows(table);
   dataRows.forEach((row, index) => {
     const td = document.createElement('td');
-    td.textContent = values[index] || '';
+    const value = values[index] || '';
+
+    // Check if value is an image URL
+    if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value)) {
+      td.appendChild(createImageLink(value));
+    } else {
+      td.textContent = value;
+    }
+
     td.setAttribute('data-wikicolumn-property', propertyId);
     td.setAttribute('data-wikicolumn-position', position.toString());
     td.classList.add('wikicolumn-added-column');
@@ -1008,10 +1050,13 @@ async function getEligibleTables(): Promise<EligibleTableInfo[]> {
   const tables = document.querySelectorAll('table');
   const eligible: EligibleTableInfo[] = [];
 
-  // Get saved tables for this URL from IndexedDB
-  await db.init();
+  // Get saved tables for this URL from background script (which has access to extension's IndexedDB)
   const url = window.location.href;
-  const savedTables = await db.getTablesByUrl(url);
+  const response = await browser.runtime.sendMessage({
+    type: 'GET_SAVED_TABLES_FOR_URL',
+    payload: { url },
+  }) as { tables: TableRecord[] } | undefined;
+  const savedTables = response?.tables || [];
 
   // Build a map of xpath -> saved columns for quick lookup
   const savedColumnsByXpath = new Map<string, AddedColumn[]>();

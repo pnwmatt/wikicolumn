@@ -286,25 +286,30 @@ function renderInstanceTypes(
       li.classList.add('primary');
     }
 
-    // Round score to 1 decimal place for display
-    const displayScore = score % 1 === 0 ? score : score.toFixed(1);
     const isChecked = selectedInstanceTypes.has(type);
 
     li.innerHTML = `
       <input type="checkbox" class="instance-type-checkbox" data-type="${type}" ${isChecked ? 'checked' : ''}>
       <span class="instance-type-name">${type}</span>
-      <span class="instance-type-score">${displayScore}</span>
+      <span class="instance-type-score">${score}%</span>
     `;
 
     // Add checkbox change handler
     const checkbox = li.querySelector('.instance-type-checkbox') as HTMLInputElement;
-    checkbox.addEventListener('change', () => {
+    checkbox.addEventListener('change', async () => {
       if (checkbox.checked) {
         selectedInstanceTypes.add(type);
       } else {
         selectedInstanceTypes.delete(type);
       }
-      refilterRowMatches();
+      await refilterRowMatches();
+
+      // Persist selected instance types to database
+      if (currentTableRecord) {
+        currentTableRecord.selectedInstanceTypes = Array.from(selectedInstanceTypes);
+        currentTableRecord.updatedAt = new Date().toISOString();
+        await db.saveTable(currentTableRecord);
+      }
     });
 
     instanceTypesList.appendChild(li);
@@ -371,6 +376,10 @@ async function refilterRowMatches(): Promise<void> {
       storedPrimaryInstanceTypes
     );
   }
+
+  // Recalculate available properties based on filtered row matches
+  const filteredQids = rowMatches.filter((m) => m.qid).map((m) => m.qid!);
+  await calculatePropertyStats(filteredQids);
 }
 
 // Open property picker modal
@@ -439,12 +448,17 @@ function renderTablePicker(): void {
     item.className = 'table-picker-item';
     item.dataset.xpath = table.xpath;
 
-    const badgeHtml = table.hasWikipediaLinks
+    const wikipediaBadgeHtml = table.hasWikipediaLinks
       ? '<span class="table-picker-item-badge">🔗 Wikipedia</span>'
       : '';
 
+    const savedColumnCount = table.savedColumns?.length || 0;
+    const savedColumnsBadgeHtml = savedColumnCount > 0
+      ? `<span class="table-picker-item-badge table-picker-item-badge-saved">+${savedColumnCount} column${savedColumnCount > 1 ? 's' : ''}</span>`
+      : '';
+
     item.innerHTML = `
-      <div class="table-picker-item-title">${escapeHtml(table.title)}${badgeHtml}</div>
+      <div class="table-picker-item-title">${escapeHtml(table.title)}${wikipediaBadgeHtml}${savedColumnsBadgeHtml}</div>
       <div class="table-picker-item-info">${table.rowCount} rows, ${table.columnCount} columns</div>
     `;
 
@@ -614,20 +628,33 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   // the score by 1 for each QID.
   setLoadingMessage('Analyzing entity types...');
 
-  // Calculate scores for each instanceOf type
-  // Normalize by dividing by the number of QIDs for each label to avoid inflation
-  const instanceOfScores = new Map<string, number>();
+  // Calculate scores: count how many rows (labels) have at least one QID with each instanceOf type
+  const instanceOfCounts = new Map<string, number>();
+  const totalLabelsWithResults = labelToQidMap.size;
+
   for (const qidMap of labelToQidMap.values()) {
-    const numQids = qidMap.size;
+    // Collect all unique instance types for this row
+    const typesForThisRow = new Set<string>();
     for (const labelMatch of qidMap.values()) {
-      // labelMatch is { itemLabel, instanceOf[] }
       for (const instanceType of labelMatch.instanceOf) {
         if (instanceType) {
-          // Divide by number of QIDs for this label to normalize
-          instanceOfScores.set(instanceType, (instanceOfScores.get(instanceType) || 0) + (1 / numQids));
+          typesForThisRow.add(instanceType);
         }
       }
     }
+    // Count each type once per row
+    for (const type of typesForThisRow) {
+      instanceOfCounts.set(type, (instanceOfCounts.get(type) || 0) + 1);
+    }
+  }
+
+  // Convert counts to percentages
+  const instanceOfScores = new Map<string, number>();
+  for (const [type, count] of instanceOfCounts) {
+    const percentage = totalLabelsWithResults > 0
+      ? Math.round((count / totalLabelsWithResults) * 100)
+      : 0;
+    instanceOfScores.set(type, percentage);
   }
 
   // Find the highest score(s) - these are the primary instance types
@@ -649,7 +676,15 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
   storedRowToLabel = rowToLabel;
   storedKeyColumnIndex = keyColumnIndex;
   storedPrimaryInstanceTypes = primaryInstanceTypes;
-  selectedInstanceTypes.clear(); // Reset filters for new table
+
+  // Restore saved instance type selections, or clear for new table
+  selectedInstanceTypes.clear();
+  if (currentTableRecord?.selectedInstanceTypes?.length) {
+    for (const type of currentTableRecord.selectedInstanceTypes) {
+      selectedInstanceTypes.add(type);
+    }
+    if (LOG_LEVEL > 1) console.log('WikiColumn: Restored saved instance types:', currentTableRecord.selectedInstanceTypes);
+  }
 
   // Render the instance types in the sidebar
   renderInstanceTypes(instanceOfScores, primaryInstanceTypes);
@@ -716,12 +751,19 @@ async function matchWikidata(keyColumnIndex: number): Promise<void> {
     // Update key column with filtered instance types
     setLoadingMessage('Updating instance types...');
     await updateInstanceOfOnPage(keyColumnIndex, labelToQidMap, primaryInstanceTypes);
+
+    // If there are saved instance type selections, apply them now
+    if (selectedInstanceTypes.size > 0) {
+      setLoadingMessage('Applying saved entity type filters...');
+      await refilterRowMatches();
+    }
   }
 
   // Enable add column button if we have matched rows
-  addColumnBtn.disabled = matchedCount === 0;
-  matchingStatus.textContent = matchedCount > 0
-    ? `${matchedCount} of ${rowMatches.length} rows matched`
+  const filteredMatchedCount = rowMatches.filter((m) => m.qid).length;
+  addColumnBtn.disabled = filteredMatchedCount === 0;
+  matchingStatus.textContent = filteredMatchedCount > 0
+    ? `${filteredMatchedCount} of ${rowMatches.length} rows matched`
     : 'No Wikipedia links found. Add Wikipedia links to enable Wikidata columns.';
 }
 

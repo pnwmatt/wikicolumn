@@ -1,5 +1,7 @@
 # WikiColumn
 
+(Submitted to Mozilla for review.  When approvied it will be available for install here: https://addons.mozilla.org/en-US/firefox/addon/wikicolumn/)
+
 A Firefox extension that lets you add columns from Wikidata to most datatables on Wikipedia. Once activated on a table, you choose which column is "key" (e.g. movie titles, business names), and then select which properties from Wikidata you want to add as new columns to the table. The extension fetches the data from Wikidata and inserts it to the table.
 
 ## Example Use Cases

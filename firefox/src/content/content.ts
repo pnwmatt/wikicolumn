@@ -271,6 +271,121 @@ function getHeaderRow(table: HTMLTableElement): HTMLTableRowElement | null {
 }
 
 // ============================================================================
+// Colspan/Rowspan Helper Functions
+// ============================================================================
+
+/**
+ * Gets the actual column count for a row, accounting for colspan attributes.
+ *
+ * @param row - The table row element
+ * @returns The total number of visual columns this row spans
+ *
+ * @example
+ * // <tr><th>A</th><th colspan="2">B</th><th>C</th></tr>
+ * getActualColumnCount(row) // returns 4 (not 3)
+ */
+function getActualColumnCount(row: HTMLTableRowElement): number {
+  const cells = row.querySelectorAll('td, th');
+  let columnCount = 0;
+
+  cells.forEach((cell) => {
+    const colspan = parseInt(cell.getAttribute('colspan') || '1', 10);
+    columnCount += colspan;
+  });
+
+  return columnCount;
+}
+
+/**
+ * Gets the cell at a specific visual column index, accounting for colspan.
+ *
+ * @param row - The table row element
+ * @param columnIndex - Zero-based visual column index
+ * @returns The cell element at that column, or undefined if not found
+ *
+ * @remarks
+ * This function handles colspan by tracking the current visual column position.
+ * For example, if cell[0] has colspan=2, then columnIndex=1 still returns cell[0].
+ *
+ * @example
+ * // <tr><th colspan="2">Name</th><th>Age</th></tr>
+ * getCellAtColumnIndex(row, 0) // returns first th
+ * getCellAtColumnIndex(row, 1) // returns first th (because of colspan=2)
+ * getCellAtColumnIndex(row, 2) // returns second th
+ */
+function getCellAtColumnIndex(row: HTMLTableRowElement, columnIndex: number): HTMLTableCellElement | undefined {
+  const cells = row.querySelectorAll('td, th');
+  let currentColumn = 0;
+
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i] as HTMLTableCellElement;
+    const colspan = parseInt(cell.getAttribute('colspan') || '1', 10);
+
+    // Check if the target column falls within this cell's span
+    if (columnIndex >= currentColumn && columnIndex < currentColumn + colspan) {
+      return cell;
+    }
+
+    currentColumn += colspan;
+  }
+
+  return undefined;
+}
+
+/**
+ * Gets the reference cell for inserting a new cell after a specific visual column.
+ * Accounts for colspan attributes when determining the correct insertion point.
+ *
+ * @param row - The table row element
+ * @param afterColumnIndex - Zero-based visual column index to insert after
+ * @returns An object containing the reference cell for insertBefore and the cell that spans the insertion point (if any)
+ *
+ * @remarks
+ * This is used with insertBefore(newCell, refCell).
+ * If the column after the insertion point is within a colspan cell, returns both:
+ * - refCell: the cell to insert before (maintains DOM order)
+ * - spanningCell: the cell with colspan that includes the insertion point (needs colspan adjustment)
+ *
+ * @example
+ * // <tr><th>Year</th><th colspan="2">Film</th><th>Director</th></tr>
+ * // To insert after column 0 (Year), we need to insert before the colspan cell
+ * getInsertionReferenceCell(row, 0) // returns { refCell: Film cell, spanningCell: null }
+ *
+ * // To insert after column 1 (inside Film colspan), we need special handling
+ * getInsertionReferenceCell(row, 1) // returns { refCell: Director cell, spanningCell: Film cell }
+ */
+function getInsertionReferenceCell(
+  row: HTMLTableRowElement,
+  afterColumnIndex: number
+): { refCell: HTMLTableCellElement | null; spanningCell: HTMLTableCellElement | null } {
+  const cells = row.querySelectorAll('td, th');
+  let currentColumn = 0;
+  let spanningCell: HTMLTableCellElement | null = null;
+
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i] as HTMLTableCellElement;
+    const colspan = parseInt(cell.getAttribute('colspan') || '1', 10);
+
+    // Check if this cell spans across the insertion point
+    const cellEndColumn = currentColumn + colspan - 1;
+    if (currentColumn <= afterColumnIndex && afterColumnIndex < currentColumn + colspan && colspan > 1) {
+      // The insertion point falls inside this colspan cell
+      spanningCell = cell;
+    }
+
+    // If we're past the insertion point, this is our reference cell
+    if (currentColumn > afterColumnIndex) {
+      return { refCell: cell, spanningCell };
+    }
+
+    currentColumn += colspan;
+  }
+
+  // If we didn't find a reference cell, append to end
+  return { refCell: null, spanningCell };
+}
+
+// ============================================================================
 // Key Column Detection Functions
 // ============================================================================
 
@@ -291,8 +406,7 @@ function columnHasWikipediaLinks(table: HTMLTableElement, colIndex: number, maxR
   const rowsToCheck = Math.min(dataRows.length, maxRows);
 
   for (let i = 0; i < rowsToCheck; i++) {
-    const cells = dataRows[i].querySelectorAll('td, th');
-    const cell = cells[colIndex] as HTMLTableCellElement | undefined;
+    const cell = getCellAtColumnIndex(dataRows[i], colIndex);
     if (cell) {
       const anchors = Array.from(cell.querySelectorAll('a[href]'));
       for (const anchor of anchors) {
@@ -330,12 +444,11 @@ function findKeyColumn(table: HTMLTableElement): number {
   const headerRow = getHeaderRow(table);
   if (!headerRow) return -1;
 
-  const numCols = headerRow.querySelectorAll('th, td').length;
+  const numCols = getActualColumnCount(headerRow);
 
   for (let colIndex = 0; colIndex < numCols; colIndex++) {
     // if the column is center aligned, skip it (likely not a key column)
-    const headerCells = headerRow.querySelectorAll('th, td');
-    const headerCell = headerCells[colIndex] as HTMLTableCellElement | undefined;
+    const headerCell = getCellAtColumnIndex(headerRow, colIndex);
     if (headerCell) {
       const textAlign = window.getComputedStyle(headerCell).textAlign;
       if (textAlign === 'center') {
@@ -371,8 +484,7 @@ function addKeyIndicator(table: HTMLTableElement, colIndex: number): void {
   const headerRow = getHeaderRow(table);
   if (!headerRow) return;
 
-  const headerCells = headerRow.querySelectorAll('th, td');
-  const headerCell = headerCells[colIndex] as HTMLTableCellElement | undefined;
+  const headerCell = getCellAtColumnIndex(headerRow, colIndex);
 
   console.log("WikiColumn: addKeyIndicator: adding key indicator to column", colIndex);
 
@@ -691,8 +803,7 @@ function injectColumn(
   if (headerRow) {
     const th = document.createElement('th');
     // Get the key column header text
-    const headerCells2 = headerRow.querySelectorAll('th, td');
-    const keyColumnHeader = headerCells2[afterColumnIndex] as HTMLTableCellElement | undefined;
+    const keyColumnHeader = getCellAtColumnIndex(headerRow, afterColumnIndex);
     const keyColumnText = keyColumnHeader?.textContent?.trim() || 'Unknown';
 
     th.innerHTML = headerHtml + `<div class="wikicolumn-key-info" style="font-size: 0.8em; font-weight: normal; color: #666; margin-top: 2px;">Key: ${keyColumnText}</div>`;
@@ -700,41 +811,61 @@ function injectColumn(
     th.setAttribute('data-wikicolumn-position', position.toString());
     th.classList.add('wikicolumn-added-column');
 
-    // Insert after the specified column (afterColumnIndex + 1 is the reference node)
-    const headerCells = headerRow.querySelectorAll('th, td');
-    const refCell = headerCells[afterColumnIndex + 1];
-    if (refCell) {
-      headerRow.insertBefore(th, refCell);
+    // Insert after the specified column using colspan-aware helper
+    const { refCell, spanningCell } = getInsertionReferenceCell(headerRow, afterColumnIndex);
+
+    if (spanningCell) {
+      // The insertion point falls inside a colspan cell in the header
+      // Increase the colspan to accommodate the new column
+      const currentColspan = parseInt(spanningCell.getAttribute('colspan') || '1', 10);
+      spanningCell.setAttribute('colspan', (currentColspan + 1).toString());
+      console.log(`WikiColumn: injectColumn: Increased header colspan from ${currentColspan} to ${currentColspan + 1} at insertion point ${afterColumnIndex}`);
     } else {
-      headerRow.appendChild(th);
+      // Normal insertion
+      if (refCell) {
+        headerRow.insertBefore(th, refCell);
+      } else {
+        headerRow.appendChild(th);
+      }
     }
   }
 
   const dataRows = getDataRows(table);
   dataRows.forEach((row, index) => {
-    const td = document.createElement('td');
-    const value = values[index] || '';
+    // Check if this row has a colspan cell at the insertion point
+    const { refCell, spanningCell } = getInsertionReferenceCell(row, afterColumnIndex);
 
-    // Check if value is an image URL
-    if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value)) {
-      td.appendChild(createImageLink(value));
-    } else if (/^http/i.test(value)) {
-      td.appendChild(createLink(value));
+    if (spanningCell) {
+      // The insertion point falls inside a colspan cell in this row
+      // Increase the colspan to accommodate the new column
+      const currentColspan = parseInt(spanningCell.getAttribute('colspan') || '1', 10);
+      spanningCell.setAttribute('colspan', (currentColspan + 1).toString());
+      if (LOG_LEVEL > 2) {
+        console.log(`WikiColumn: injectColumn: Increased data row ${index} colspan from ${currentColspan} to ${currentColspan + 1} at insertion point ${afterColumnIndex}`);
+      }
     } else {
-      td.textContent = value;
-    }
+      // Normal insertion - create a new cell
+      const td = document.createElement('td');
+      const value = values[index] || '';
 
-    td.setAttribute('data-wikicolumn-property', propertyId);
-    td.setAttribute('data-wikicolumn-position', position.toString());
-    td.classList.add('wikicolumn-added-column');
+      // Check if value is an image URL
+      if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value)) {
+        td.appendChild(createImageLink(value));
+      } else if (/^http/i.test(value)) {
+        td.appendChild(createLink(value));
+      } else {
+        td.textContent = value;
+      }
 
-    // Insert after the specified column
-    const cells = row.querySelectorAll('td, th');
-    const refCell = cells[afterColumnIndex + 1];
-    if (refCell) {
-      row.insertBefore(td, refCell);
-    } else {
-      row.appendChild(td);
+      td.setAttribute('data-wikicolumn-property', propertyId);
+      td.setAttribute('data-wikicolumn-position', position.toString());
+      td.classList.add('wikicolumn-added-column');
+
+      if (refCell) {
+        row.insertBefore(td, refCell);
+      } else {
+        row.appendChild(td);
+      }
     }
   });
 }
@@ -783,8 +914,7 @@ function updateKeyColumnWithInstanceOf(
   const dataRows = getDataRows(table);
 
   dataRows.forEach((row, rowIndex) => {
-    const cells = row.querySelectorAll('td, th');
-    const cell = cells[keyColIndex] as HTMLTableCellElement | undefined;
+    const cell = getCellAtColumnIndex(row, keyColIndex);
 
     if (cell && instanceOfData.has(rowIndex)) {
       const instanceOf = instanceOfData.get(rowIndex)!;
@@ -827,8 +957,7 @@ function highlightUnmatchedCells(table: HTMLTableElement, labels: string[], keyC
   console.log("WikiColumn: highlightUnmatchedCells: highlighting unmatched cells in column", keyColumnIndex, "with labels:", labels);
 
   dataRows.forEach((row) => {
-    const cells = row.querySelectorAll('td, th');
-    const keyCell = cells[keyColumnIndex] as HTMLTableCellElement | undefined;
+    const keyCell = getCellAtColumnIndex(row, keyColumnIndex);
 
     if (!keyCell) return;
 
@@ -921,8 +1050,7 @@ async function reinjectSavedColumns(): Promise<void> {
         continue;
       }
 
-      const headerCells = headerRow.querySelectorAll('th, td');
-      const keyColumnHeader = headerCells[tableRecord.keyColumnIndex] as HTMLTableCellElement | undefined;
+      const keyColumnHeader = getCellAtColumnIndex(headerRow, tableRecord.keyColumnIndex);
       const savedKeyHeader = tableRecord.originalColumns[tableRecord.keyColumnIndex]?.header || '';
       const currentKeyHeader = keyColumnHeader?.textContent?.trim() || '';
 
@@ -939,8 +1067,7 @@ async function reinjectSavedColumns(): Promise<void> {
       const rowToLabel = new Map<number, string>();
 
       dataRows.forEach((row, rowIndex) => {
-        const cells = row.querySelectorAll('td, th');
-        const keyCell = cells[tableRecord.keyColumnIndex] as HTMLTableCellElement | undefined;
+        const keyCell = getCellAtColumnIndex(row, tableRecord.keyColumnIndex);
         if (keyCell && keyCell.textContent?.trim()) {
           const label = keyCell.textContent.replace(/^\d+\.\s*/, '').replace(/(‡|§)$/, '').trim();
           labels.push(label);
@@ -1121,8 +1248,8 @@ async function getEligibleTables(): Promise<EligibleTableInfo[]> {
       return;
     }
 
-    // Get column count from header
-    const columnCount = headerRow ? headerRow.querySelectorAll('th, td').length : 0;
+    // Get column count from header (accounting for colspan)
+    const columnCount = headerRow ? getActualColumnCount(headerRow) : 0;
 
     // Check if any column has Wikipedia links
     const hasWikipediaLinks = findKeyColumn(tableEl) >= 0;

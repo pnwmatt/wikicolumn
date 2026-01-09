@@ -338,39 +338,51 @@ function getCellAtColumnIndex(row: HTMLTableRowElement, columnIndex: number): HT
  *
  * @param row - The table row element
  * @param afterColumnIndex - Zero-based visual column index to insert after
- * @returns The cell that should be used as a reference for insertBefore, or null to append
+ * @returns An object containing the reference cell for insertBefore and the cell that spans the insertion point (if any)
  *
  * @remarks
  * This is used with insertBefore(newCell, refCell).
- * If the column after the insertion point is within a colspan cell, the function
- * returns the cell that starts after the colspan.
+ * If the column after the insertion point is within a colspan cell, returns both:
+ * - refCell: the cell to insert before (maintains DOM order)
+ * - spanningCell: the cell with colspan that includes the insertion point (needs colspan adjustment)
  *
  * @example
  * // <tr><th>Year</th><th colspan="2">Film</th><th>Director</th></tr>
  * // To insert after column 0 (Year), we need to insert before the colspan cell
- * getInsertionReferenceCell(row, 0) // returns second th (colspan=2)
+ * getInsertionReferenceCell(row, 0) // returns { refCell: Film cell, spanningCell: null }
  *
- * // To insert after column 2 (within the colspan), we need to insert before Director
- * getInsertionReferenceCell(row, 2) // returns fourth th (Director)
+ * // To insert after column 1 (inside Film colspan), we need special handling
+ * getInsertionReferenceCell(row, 1) // returns { refCell: Director cell, spanningCell: Film cell }
  */
-function getInsertionReferenceCell(row: HTMLTableRowElement, afterColumnIndex: number): HTMLTableCellElement | null {
+function getInsertionReferenceCell(
+  row: HTMLTableRowElement,
+  afterColumnIndex: number
+): { refCell: HTMLTableCellElement | null; spanningCell: HTMLTableCellElement | null } {
   const cells = row.querySelectorAll('td, th');
   let currentColumn = 0;
+  let spanningCell: HTMLTableCellElement | null = null;
 
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i] as HTMLTableCellElement;
     const colspan = parseInt(cell.getAttribute('colspan') || '1', 10);
 
+    // Check if this cell spans across the insertion point
+    const cellEndColumn = currentColumn + colspan - 1;
+    if (currentColumn <= afterColumnIndex && afterColumnIndex < currentColumn + colspan && colspan > 1) {
+      // The insertion point falls inside this colspan cell
+      spanningCell = cell;
+    }
+
     // If we're past the insertion point, this is our reference cell
     if (currentColumn > afterColumnIndex) {
-      return cell;
+      return { refCell: cell, spanningCell };
     }
 
     currentColumn += colspan;
   }
 
   // If we didn't find a reference cell, append to end
-  return null;
+  return { refCell: null, spanningCell };
 }
 
 // ============================================================================
@@ -800,38 +812,60 @@ function injectColumn(
     th.classList.add('wikicolumn-added-column');
 
     // Insert after the specified column using colspan-aware helper
-    const refCell = getInsertionReferenceCell(headerRow, afterColumnIndex);
-    if (refCell) {
-      headerRow.insertBefore(th, refCell);
+    const { refCell, spanningCell } = getInsertionReferenceCell(headerRow, afterColumnIndex);
+
+    if (spanningCell) {
+      // The insertion point falls inside a colspan cell in the header
+      // Increase the colspan to accommodate the new column
+      const currentColspan = parseInt(spanningCell.getAttribute('colspan') || '1', 10);
+      spanningCell.setAttribute('colspan', (currentColspan + 1).toString());
+      console.log(`WikiColumn: injectColumn: Increased header colspan from ${currentColspan} to ${currentColspan + 1} at insertion point ${afterColumnIndex}`);
     } else {
-      headerRow.appendChild(th);
+      // Normal insertion
+      if (refCell) {
+        headerRow.insertBefore(th, refCell);
+      } else {
+        headerRow.appendChild(th);
+      }
     }
   }
 
   const dataRows = getDataRows(table);
   dataRows.forEach((row, index) => {
-    const td = document.createElement('td');
-    const value = values[index] || '';
+    // Check if this row has a colspan cell at the insertion point
+    const { refCell, spanningCell } = getInsertionReferenceCell(row, afterColumnIndex);
 
-    // Check if value is an image URL
-    if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value)) {
-      td.appendChild(createImageLink(value));
-    } else if (/^http/i.test(value)) {
-      td.appendChild(createLink(value));
+    if (spanningCell) {
+      // The insertion point falls inside a colspan cell in this row
+      // Increase the colspan to accommodate the new column
+      const currentColspan = parseInt(spanningCell.getAttribute('colspan') || '1', 10);
+      spanningCell.setAttribute('colspan', (currentColspan + 1).toString());
+      if (LOG_LEVEL > 2) {
+        console.log(`WikiColumn: injectColumn: Increased data row ${index} colspan from ${currentColspan} to ${currentColspan + 1} at insertion point ${afterColumnIndex}`);
+      }
     } else {
-      td.textContent = value;
-    }
+      // Normal insertion - create a new cell
+      const td = document.createElement('td');
+      const value = values[index] || '';
 
-    td.setAttribute('data-wikicolumn-property', propertyId);
-    td.setAttribute('data-wikicolumn-position', position.toString());
-    td.classList.add('wikicolumn-added-column');
+      // Check if value is an image URL
+      if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value)) {
+        td.appendChild(createImageLink(value));
+      } else if (/^http/i.test(value)) {
+        td.appendChild(createLink(value));
+      } else {
+        td.textContent = value;
+      }
 
-    // Insert after the specified column using colspan-aware helper
-    const refCell = getInsertionReferenceCell(row, afterColumnIndex);
-    if (refCell) {
-      row.insertBefore(td, refCell);
-    } else {
-      row.appendChild(td);
+      td.setAttribute('data-wikicolumn-property', propertyId);
+      td.setAttribute('data-wikicolumn-position', position.toString());
+      td.classList.add('wikicolumn-added-column');
+
+      if (refCell) {
+        row.insertBefore(td, refCell);
+      } else {
+        row.appendChild(td);
+      }
     }
   });
 }
